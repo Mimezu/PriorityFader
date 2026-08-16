@@ -1,0 +1,13 @@
+# Generated release archives; source history lives in Git.
+/Versions/*.zip
+
+# Local editor and operating-system metadata.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# WoW saved variables belong under WTF and must never be committed here.
+*.bak
+*.tmp

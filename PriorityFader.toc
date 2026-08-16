@@ -1,0 +1,16 @@
+## Interface: 120100
+## Title: Priority Fader
+## Notes: Compact, priority-based opacity reactions for your UI.
+## Author: Miche & Codex
+## Version: 2.3.0
+## SavedVariables: PriorityFaderDB
+## OptionalDeps: EllesmereUI, OPie, DialogueUI, Details, SpeedyAutoLoot
+## IconTexture: Interface\Icons\Spell_Mage_ArcaneOrb
+## Category-enUS: Interface
+
+Core.lua
+Targets.lua
+EUIUnitVisibility.lua
+CDMExperimental.lua
+MinimapStack.lua
+Options.lua

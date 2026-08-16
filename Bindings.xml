@@ -1,0 +1,5 @@
+<Bindings>
+    <Binding name="PRIORITYFADER_TOGGLE_CINEMATIC" header="PRIORITYFADER">
+        PriorityFader_ToggleCinematic()
+    </Binding>
+</Bindings>
