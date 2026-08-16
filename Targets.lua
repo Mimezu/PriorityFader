@@ -9,6 +9,16 @@ ns.Targets = {
     { id = "eui_bar3", label = "Action Bar 3", source = "Ellesmere", names = { "EABBar_Bar3", "MultiBarBottomRight" }, protected = true },
     { id = "eui_bar4", label = "Action Bar 4", source = "Ellesmere", names = { "EABBar_Bar4", "MultiBarRight" }, protected = true },
     { id = "eui_bar5", label = "Action Bar 5", source = "Ellesmere", names = { "EABBar_Bar5", "MultiBarLeft" }, protected = true },
+    { id = "eui_castbar", label = "Cast Bar", source = "Ellesmere / Blizzard", names = { "ERB_CastBarFrame", "PlayerCastingBarFrame" }, protected = true,
+        capability = "Visibility overlay", capabilityTone = "teal", capabilityNote = "Priority Fader changes only the bar's final opacity. Ellesmere or Blizzard keeps its styling, placement, and casting behavior." },
+    { id = "eui_resourcebars", label = "Resource Bars", source = "Ellesmere", names = { "EllesmereUIResourceBarsFrame" }, protected = false,
+        capability = "Container visibility", capabilityTone = "teal", capabilityNote = "Priority Fader fades Ellesmere's shared Resource Bars container. Ellesmere keeps every bar's styling, values, and layout." },
+    { id = "cdm_cooldowns", label = "CDM · Cooldowns", source = "Blizzard CDM / Ellesmere", names = { "EssentialCooldownViewer" }, protected = true,
+        capability = "Viewer-level fade", capabilityTone = "teal", capabilityNote = "Fades the complete Cooldowns viewer. Ellesmere keeps every icon's bar placement, styling, alerts, and gameplay state." },
+    { id = "cdm_utility", label = "CDM · Utility", source = "Blizzard CDM / Ellesmere", names = { "UtilityCooldownViewer" }, protected = true,
+        capability = "Viewer-level fade", capabilityTone = "teal", capabilityNote = "Fades the complete Utility viewer. Custom Ellesmere bars inherit the visibility of their underlying Blizzard category." },
+    { id = "cdm_buffs", label = "CDM · Buffs / auras", source = "Blizzard CDM / Ellesmere", names = { "BuffIconCooldownViewer" }, protected = true,
+        capability = "Viewer-level fade", capabilityTone = "teal", capabilityNote = "Fades the complete Buff Icons viewer while Ellesmere retains per-icon styling, alerts, and placement." },
     { id = "eui_player", label = "Player Frame", source = "Ellesmere", names = { "EllesmereUIUnitFrames_Player", "PlayerFrame" }, protected = true },
     { id = "eui_target", label = "Target Frame", source = "Ellesmere", names = { "EllesmereUIUnitFrames_Target", "TargetFrame" }, protected = true },
     { id = "eui_focus", label = "Focus Frame", source = "Ellesmere", names = { "EllesmereUIUnitFrames_Focus", "FocusFrame" }, protected = true },
@@ -24,6 +34,8 @@ ns.Targets = {
     { id = "chat", label = "Chat", source = "Blizzard", names = { "ChatFrame1" }, protected = false },
     { id = "minimap", label = "Minimap", source = "Blizzard", names = { "Minimap" }, protected = false },
     { id = "objectives", label = "Objectives", source = "Blizzard", names = { "ObjectiveTrackerFrame" }, protected = false },
+    { id = "blizzard_damage_meter", label = "Blizzard Damage Meter", source = "Blizzard", names = { "DamageMeterSessionWindow1" }, protected = false,
+        capability = "Native damage meter", capabilityTone = "teal", capabilityNote = "Fades Blizzard's complete native damage-meter window without changing its data, display type, layout, or enabled state." },
 }
 
 ns.TargetByID = {}
@@ -93,7 +105,6 @@ function ns:RegisterTarget(definition)
         acquire = definition.acquire,
         release = definition.release,
         skipManagedAlphaHook = definition.skipManagedAlphaHook == true,
-        cdmExperimental = definition.cdmExperimental == true,
         external = true,
     }
     self.Targets[#self.Targets + 1] = target
@@ -285,7 +296,8 @@ function ns:IsOPieSceneFrame(frame)
     if not frame then return false end
     if frame == self._opieProxy or frame == self._opieMainFrame then return true end
     local now = GetTime and GetTime() or 0
-    if not InCombatLockdown() and (not self._opieProxy or (not self._opieMainFrame and now - (self._opieResolvedAt or 0) >= 1)) then
+    if not InCombatLockdown() and not self._opieMainFrame
+        and now - (self._opieResolvedAt or 0) >= 1 then
         self:RefreshOPieFrames()
     end
     return frame == self._opieProxy or frame == self._opieMainFrame
@@ -805,12 +817,13 @@ local function IsFrameAncestor(ancestor, frame)
 end
 
 function ns:RegisterDiscoveredFrame(frame, label, exactFrame)
-    -- EUI Cooldown Manager's visible icons are not children of its layout
-    -- shell.  When the picker lands on that shell, route it to the dedicated
-    -- composite icon target instead of registering a misleading plain frame.
-    if self.GetExperimentalCDMTargetForFrame then
-        local cdmID = self:GetExperimentalCDMTargetForFrame(frame)
-        if cdmID then return cdmID end
+    if self.GetDetailsTargetForFrame then
+        local detailsID = self:GetDetailsTargetForFrame(frame)
+        if detailsID then return detailsID end
+    end
+    if self.GetSemanticProviderTargetForFrame then
+        local providerID = self:GetSemanticProviderTargetForFrame(frame)
+        if providerID then return providerID end
     end
     local root = self:GetFramePickerRoot(frame)
     if not root then return nil, "That frame cannot be managed safely." end
@@ -888,6 +901,73 @@ function ns:RegisterStoredCustomFrames()
             })
         end
     end
+end
+
+function ns:CanForgetCustomTarget(id)
+    if type(id) ~= "string" then return false end
+    local stored = PriorityFaderDB and PriorityFaderDB.customTargets
+    return (type(stored) == "table" and stored[id] ~= nil)
+        or id:match("^session_frame_") ~= nil
+end
+
+local function RemoveTargetFromSavedProfile(profile, id)
+    if type(profile) ~= "table" then return end
+    profile.targets = type(profile.targets) == "table" and profile.targets or {}
+    profile.groups = type(profile.groups) == "table" and profile.groups or {}
+    profile.links = type(profile.links) == "table" and profile.links or {}
+    profile.visibilityLinks = type(profile.visibilityLinks) == "table" and profile.visibilityLinks or {}
+    profile.targets[id] = nil
+    for groupID, group in pairs(profile.groups) do
+        if type(group) ~= "table" or type(group.members) ~= "table" then
+            profile.groups[groupID] = nil
+        else
+            group.members[id] = nil
+            local count = 0
+            for memberID, enabled in pairs(group.members) do
+                if type(memberID) == "string" and enabled == true then count = count + 1 end
+            end
+            if count < 2 then profile.groups[groupID] = nil end
+        end
+    end
+    profile.links[id] = nil
+    for parentID, children in pairs(profile.links) do
+        if type(children) ~= "table" then
+            profile.links[parentID] = nil
+        else
+            children[id] = nil
+            if not next(children) then profile.links[parentID] = nil end
+        end
+    end
+    profile.visibilityLinks[id] = nil
+    for parentID, children in pairs(profile.visibilityLinks) do
+        if type(children) ~= "table" then
+            profile.visibilityLinks[parentID] = nil
+        else
+            children[id] = nil
+            if not next(children) then profile.visibilityLinks[parentID] = nil end
+        end
+    end
+end
+
+function ns:ForgetCustomTarget(id)
+    if not self:CanForgetCustomTarget(id) then
+        return false, "Built-in and provider frames remain in the catalog."
+    end
+    -- Restore the live frame before removing its resolver and catalog entry.
+    if self.Profile and self:Profile().targets[id] then self:RemoveTarget(id) end
+    local db = PriorityFaderDB
+    for _, profile in pairs(type(db.profiles) == "table" and db.profiles or {}) do
+        RemoveTargetFromSavedProfile(profile, id)
+    end
+    if type(db.customTargets) == "table" then db.customTargets[id] = nil end
+    for index = #self.Targets, 1, -1 do
+        if self.Targets[index].id == id then table.remove(self.Targets, index) end
+    end
+    self.TargetByID[id] = nil
+    if self.Options and self.Options.selected == id then self.Options.selected = nil end
+    if self.ReconcileCinematicOwnership then self:ReconcileCinematicOwnership() end
+    self:RefreshOptions()
+    return true, "Frame removed from the catalog and every profile."
 end
 
 function ns:DiscoverVisibleFrameRoots()

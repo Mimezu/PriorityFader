@@ -1,7 +1,7 @@
 local ADDON, ns = ...
 
 ns.NAME = "Priority Fader"
-ns.VERSION = "2.3.0"
+ns.VERSION = "2.5.0"
 BINDING_HEADER_PRIORITYFADER = "Priority Fader"
 BINDING_NAME_PRIORITYFADER_TOGGLE_CINEMATIC = "Toggle Cinematic Mode"
 ns.MAX_REACTIONS_PER_TARGET = 32
@@ -14,10 +14,11 @@ ns.COLORS = {
     teal = { 0.15, 0.82, 0.74, 1 },
     muted = { 0.62, 0.64, 0.72, 1 },
     amber = { 0.94, 0.65, 0.22, 1 },
+    cinematic = { 0.90, 0.52, 0.24, 1 },
 }
 
 local DEFAULTS = {
-    version = 8,
+    version = 10,
     profile = "Default",
     cinematic = {},
     profiles = {
@@ -25,6 +26,7 @@ local DEFAULTS = {
             targets = {},
             groups = {},
             links = {},
+            visibilityLinks = {},
             nextReactionID = 1,
             nextGroupID = 1,
         },
@@ -38,10 +40,12 @@ local DEFAULT_REACTIONS = {
 
 local CONDITION_INFO = {
     mouseover = { label = "Mouseover", category = "presence", kind = "state" },
+    linked_parent_hover = { label = "Linked parent hover", category = "legacy", kind = "state", internal = true },
     combat = { label = "In combat", category = "presence", kind = "state" },
     out_of_combat = { label = "Out of combat", category = "presence", kind = "state" },
     moving = { label = "Moving", category = "presence", kind = "state", restricted = true },
     stationary = { label = "Stationary", category = "presence", kind = "state", restricted = true },
+    casting = { label = "Is casting", category = "presence", kind = "state" },
     falling = { label = "Falling", category = "presence", kind = "state" },
     shift = { label = "Shift held", category = "presence", kind = "state" },
     control = { label = "Control held", category = "presence", kind = "state" },
@@ -118,6 +122,7 @@ local runtime = {
     moments = {},
     context = {},
     fadeOutStarted = {},
+    revealGoal = {},
     pendingRestore = setmetatable({}, { __mode = "k" }),
     pendingRelease = setmetatable({}, { __mode = "k" }),
     normalized = setmetatable({}, { __mode = "k" }),
@@ -130,9 +135,12 @@ local runtime = {
     cinematicAlphaGuard = setmetatable({}, { __mode = "k" }),
     cinematicExemptFrames = setmetatable({}, { __mode = "k" }),
     cinematicRootScanAt = 0,
+    cinematicAuditAt = 0,
+    cinematicRevealActive = nil,
+    cinematicRescanToken = 0,
     lastTick = 0,
     lastMouseTick = 0,
-    lastCDMRefresh = 0,
+    playerCasting = false,
 }
 ns.runtime = runtime
 
@@ -217,11 +225,12 @@ function ns:Profile()
     local db = PriorityFaderDB
     db.profiles = db.profiles or {}
     db.profile = db.profile or "Default"
-    db.profiles[db.profile] = db.profiles[db.profile] or { targets = {}, groups = {}, links = {}, nextReactionID = 1, nextGroupID = 1 }
+    db.profiles[db.profile] = db.profiles[db.profile] or { targets = {}, groups = {}, links = {}, visibilityLinks = {}, nextReactionID = 1, nextGroupID = 1 }
     local profile = db.profiles[db.profile]
     profile.targets = type(profile.targets) == "table" and profile.targets or {}
     profile.groups = type(profile.groups) == "table" and profile.groups or {}
     profile.links = type(profile.links) == "table" and profile.links or {}
+    profile.visibilityLinks = type(profile.visibilityLinks) == "table" and profile.visibilityLinks or {}
     profile.nextReactionID = tonumber(profile.nextReactionID) or 1
     profile.nextGroupID = tonumber(profile.nextGroupID) or 1
     return profile
@@ -250,6 +259,7 @@ function ns:MigrateDatabase()
         profile.targets = type(profile.targets) == "table" and profile.targets or {}
         profile.groups = type(profile.groups) == "table" and profile.groups or {}
         profile.links = type(profile.links) == "table" and profile.links or {}
+        profile.visibilityLinks = type(profile.visibilityLinks) == "table" and profile.visibilityLinks or {}
         local retired = {}
         for id in pairs(profile.targets) do if matches(id) then retired[#retired + 1] = id end end
         for _, id in ipairs(retired) do
@@ -274,6 +284,85 @@ function ns:MigrateDatabase()
                     children[id] = nil
                     if not next(children) then profile.links[parentID] = nil end
                 end
+            end
+            profile.visibilityLinks[id] = nil
+            for parentID, children in pairs(profile.visibilityLinks) do
+                if type(children) ~= "table" then
+                    profile.visibilityLinks[parentID] = nil
+                else
+                    children[id] = nil
+                    if not next(children) then profile.visibilityLinks[parentID] = nil end
+                end
+            end
+        end
+    end
+    local function RemapProfileTarget(profile, fromID, toID)
+        if type(profile) ~= "table" or type(fromID) ~= "string" or fromID == toID then return end
+        profile.targets = type(profile.targets) == "table" and profile.targets or {}
+        profile.groups = type(profile.groups) == "table" and profile.groups or {}
+        profile.links = type(profile.links) == "table" and profile.links or {}
+        profile.visibilityLinks = type(profile.visibilityLinks) == "table" and profile.visibilityLinks or {}
+        if profile.targets[fromID] ~= nil then
+            if profile.targets[toID] == nil then profile.targets[toID] = profile.targets[fromID] end
+            profile.targets[fromID] = nil
+        end
+        for groupID, group in pairs(profile.groups) do
+            if type(group) ~= "table" or type(group.members) ~= "table" then
+                profile.groups[groupID] = nil
+            else
+                if group.members[fromID] == true then
+                    group.members[fromID] = nil
+                    group.members[toID] = true
+                end
+                local count = 0
+                for memberID, enabled in pairs(group.members) do
+                    if enabled == true and type(memberID) == "string" then count = count + 1 else group.members[memberID] = nil end
+                end
+                if count < 2 then profile.groups[groupID] = nil end
+            end
+        end
+        local oldChildren = profile.links[fromID]
+        if type(oldChildren) == "table" then
+            local children = type(profile.links[toID]) == "table" and profile.links[toID] or {}
+            for childID, enabled in pairs(oldChildren) do
+                local mapped = childID == fromID and toID or childID
+                if enabled == true and mapped ~= toID then children[mapped] = true end
+            end
+            profile.links[toID] = next(children) and children or nil
+        end
+        profile.links[fromID] = nil
+        for parentID, children in pairs(profile.links) do
+            if type(children) ~= "table" then
+                profile.links[parentID] = nil
+            else
+                if children[fromID] == true then
+                    children[fromID] = nil
+                    if parentID ~= toID then children[toID] = true end
+                end
+                children[parentID] = nil
+                if not next(children) then profile.links[parentID] = nil end
+            end
+        end
+        local inherited = profile.visibilityLinks[fromID]
+        if type(inherited) == "table" then
+            local children = type(profile.visibilityLinks[toID]) == "table" and profile.visibilityLinks[toID] or {}
+            for childID, enabled in pairs(inherited) do
+                local mapped = childID == fromID and toID or childID
+                if enabled == true and mapped ~= toID then children[mapped] = true end
+            end
+            profile.visibilityLinks[toID] = next(children) and children or nil
+        end
+        profile.visibilityLinks[fromID] = nil
+        for parentID, children in pairs(profile.visibilityLinks) do
+            if type(children) ~= "table" then
+                profile.visibilityLinks[parentID] = nil
+            else
+                if children[fromID] == true then
+                    children[fromID] = nil
+                    if parentID ~= toID then children[toID] = true end
+                end
+                children[parentID] = nil
+                if not next(children) then profile.visibilityLinks[parentID] = nil end
             end
         end
     end
@@ -443,19 +532,51 @@ function ns:MigrateDatabase()
             end
         end
     end
+    if oldVersion < 9 then
+        -- Replace the experimental per-EUI-bar bridge with stable Blizzard
+        -- viewer targets. Existing picker-created viewer rules retain their
+        -- settings and graph relationships under the canonical target IDs.
+        local viewerTargets = {
+            EssentialCooldownViewer = "cdm_cooldowns",
+            UtilityCooldownViewer = "cdm_utility",
+            BuffIconCooldownViewer = "cdm_buffs",
+        }
+        db.customTargets = type(db.customTargets) == "table" and db.customTargets or {}
+        local remapped = {}
+        for customID, definition in pairs(db.customTargets) do
+            local toID = type(definition) == "table" and viewerTargets[definition.name] or nil
+            if type(customID) == "string" and toID then remapped[#remapped + 1] = { customID, toID } end
+        end
+        for _, mapping in ipairs(remapped) do
+            for _, profile in pairs(db.profiles or {}) do RemapProfileTarget(profile, mapping[1], mapping[2]) end
+            db.customTargets[mapping[1]] = nil
+        end
+        for _, profile in pairs(db.profiles or {}) do
+            RemoveProfileTargets(profile, function(id)
+                return type(id) == "string" and id:match("^experimental_cdm_") ~= nil
+            end)
+        end
+    end
+    if oldVersion < 10 then
+        for _, profile in pairs(db.profiles or {}) do
+            if type(profile) == "table" then profile.visibilityLinks = {} end
+        end
+    end
     -- Session-only roots cannot survive a reload. Do this every login rather
     -- than only during the schema migration that introduced them.
     for _, profile in pairs(db.profiles or {}) do
         RemoveProfileTargets(profile, function(id) return type(id) == "string" and id:match("^session_frame_") end)
     end
-    db.version = 8
+    db.version = 10
 end
 
 local CINEMATIC_PROFILE_LABEL = "Cinematic Mode"
-local CINEMATIC_TEMPLATE_VERSION = 3
+local CINEMATIC_TEMPLATE_VERSION = 4
 local CINEMATIC_COMPONENTS = {
     { id = "eui_player", label = "Player frame", default = "context_hover", rest = 0 },
     { id = "eui_target", label = "Target frame", default = "context_hover", rest = 0 },
+    { id = "eui_castbar", label = "Cast bar", default = "casting", rest = 0 },
+    { id = "eui_resourcebars", label = "Resource bars", default = "combat", rest = 0 },
     { id = "minimap", label = "Minimap", default = "hover", rest = 0 },
 }
 ns.CINEMATIC_COMPONENTS = CINEMATIC_COMPONENTS
@@ -465,6 +586,7 @@ local CINEMATIC_MODE_CONDITIONS = {
     target_hover = { "alt", "mouseover", "target_any" },
     combat_hover = { "alt", "mouseover", "combat" },
     combat = { "alt", "combat" },
+    casting = { "alt", "casting" },
     hover = { "alt", "mouseover" },
     quest_hover = { "alt", "mouseover", "quest_update", "quest_accepted", "quest_turned_in", "quest_objective" },
     loot_hover = { "alt", "mouseover", "loot", "loot_opened" },
@@ -475,6 +597,7 @@ ns.CINEMATIC_MODE_LABELS = {
     target_hover = "Target + hover",
     combat_hover = "Combat + hover",
     combat = "Combat only",
+    casting = "Casting only",
     hover = "Hover only",
     quest_hover = "Quest + hover",
     loot_hover = "Loot + hover",
@@ -533,11 +656,11 @@ function ns:EnsureCinematicProfile()
             suffix = suffix + 1
         end
         cinematic.profileName = profileName
-        db.profiles[profileName] = db.profiles[profileName] or { targets = {}, groups = {}, links = {}, nextReactionID = 1, nextGroupID = 1 }
+        db.profiles[profileName] = db.profiles[profileName] or { targets = {}, groups = {}, links = {}, visibilityLinks = {}, nextReactionID = 1, nextGroupID = 1 }
         local profile = db.profiles[profileName]
         created = true
         profile.cinematicSystem = true
-        profile.targets, profile.groups, profile.links = {}, {}, {}
+        profile.targets, profile.groups, profile.links, profile.visibilityLinks = {}, {}, {}, {}
         profile.nextReactionID, profile.nextGroupID = 1, 1
         for _, component in ipairs(CINEMATIC_COMPONENTS) do
             profile.targets[component.id] = NewCinematicSettings(profile, component.default, component.rest)
@@ -567,6 +690,14 @@ function ns:EnsureCinematicProfile()
         if CinematicSettingsMatch(profile.targets.eui_target, "target_hover", 0) then
             profile.targets.eui_target = NewCinematicSettings(profile, "context_hover", 0)
         end
+        if cinematic.templateVersion < 4 then
+            if profile.targets.eui_castbar == nil then
+                profile.targets.eui_castbar = NewCinematicSettings(profile, "casting", 0)
+            end
+            if profile.targets.eui_resourcebars == nil then
+                profile.targets.eui_resourcebars = NewCinematicSettings(profile, "combat", 0)
+            end
+        end
     end
     cinematic.templateVersion = CINEMATIC_TEMPLATE_VERSION
     return cinematic.profileName, db.profiles[cinematic.profileName]
@@ -579,6 +710,19 @@ end
 
 function ns:IsCinematicActive()
     return PriorityFaderDB and PriorityFaderDB.profile == self:GetCinematicProfileName()
+end
+
+function ns:InvalidateTargetTransition(id)
+    local profile = PriorityFaderDB and PriorityFaderDB.profiles and PriorityFaderDB.profiles[PriorityFaderDB.profile]
+    local links = profile and profile.visibilityLinks or {}
+    local function Clear(current, seen)
+        if not current or seen[current] then return end
+        seen[current] = true
+        runtime.revealGoal[current] = nil
+        runtime.fadeOutStarted[current] = nil
+        for childID in pairs(type(links[current]) == "table" and links[current] or {}) do Clear(childID, seen) end
+    end
+    Clear(id, {})
 end
 
 local CINEMATIC_LOCKED_NAMES = {
@@ -669,6 +813,7 @@ end
 
 function ns:RefreshCinematicExemptions()
     local frames = setmetatable({}, { __mode = "k" })
+    if self.AddSceneProviderExemptions then self:AddSceneProviderExemptions(frames) end
     local profile = self:GetCinematicProfile()
     for id in pairs(profile.targets or {}) do
         local frame = self:ResolveTarget(id)
@@ -677,6 +822,18 @@ function ns:RefreshCinematicExemptions()
             return frame and type(frame.GetPriorityFaderVisualFrame) == "function" and frame:GetPriorityFaderVisualFrame() or nil
         end)
         if okVisual and resolvedVisual then visual = resolvedVisual end
+        local okFrames, providerFrames = pcall(function()
+            return frame and type(frame.GetPriorityFaderCinematicFrames) == "function" and frame:GetPriorityFaderCinematicFrames() or nil
+        end)
+        if okFrames and type(providerFrames) == "table" then
+            for _, providerFrame in pairs(providerFrames) do
+                if providerFrame then
+                    frames[providerFrame] = true
+                    local providerRoot = self:GetFramePickerRoot(providerFrame)
+                    if providerRoot then frames[providerRoot] = true end
+                end
+            end
+        end
         local boundary = frame and self.GetEUIUnitFrameBoundary and self:GetEUIUnitFrameBoundary(frame)
         local root = visual and self:GetFramePickerRoot(visual)
         if boundary then
@@ -747,7 +904,7 @@ function ns:KeepCinematicFrame(frame)
     end
     self:RefreshCinematicExemptions()
     if self:IsCinematicActive() and not InCombatLockdown() then self:SetCinematicUIMode(false) end
-    self:UpdateCinematicBlackout()
+    self:UpdateCinematicBlackout(true)
     return true, name and "This UI root will stay visible in Cinematic Mode." or "This unnamed UI root will stay visible until you reload."
 end
 
@@ -823,7 +980,9 @@ function ns:HookCinematicRoot(root)
 end
 
 local function LeaseCinematicFrame(self, frame)
-    if not frame or self:IsCinematicBlackoutExempt(frame) then return false end
+    if not frame then return false end
+    if runtime.cinematicBlackout[frame] then return true end
+    if self:IsCinematicBlackoutExempt(frame) then return false end
     local alpha = SafeFrameAlpha(frame)
     if alpha == nil then return false end
     local record = runtime.cinematicBlackout[frame]
@@ -854,16 +1013,29 @@ function ns:BeginCinematicBlackout()
     end
     runtime.cinematicBlackoutCount = count
     runtime.cinematicRootScanAt = GetTime()
-    self:UpdateCinematicBlackout()
+    self:UpdateCinematicBlackout(true)
     return true, count
 end
 
-function ns:UpdateCinematicBlackout()
+function ns:UpdateCinematicBlackout(force)
     if not self:IsCinematicActive() then return end
     local reveal = runtime.cinematicPickerReveal or (IsAltKeyDown and IsAltKeyDown()) or false
+    local now = GetTime()
+    local revealChanged = runtime.cinematicRevealActive ~= reveal
+    runtime.cinematicRevealActive = reveal
+    -- SetAlpha/OnShow post-hooks handle ordinary host repaints immediately.
+    -- A low-rate guarded audit remains for frames whose hooks could not be
+    -- installed, while Alt/Peek and ownership changes still update at once.
+    if not force and not revealChanged and now - (runtime.cinematicAuditAt or 0) < 0.5 then return end
+    runtime.cinematicAuditAt = now
     local count = 0
     for root, record in pairs(runtime.cinematicBlackout) do
-        if self:IsCinematicBlackoutExempt(root) then
+        -- Full exemption classification is stable between explicit scene
+        -- ownership changes and root rescans. Minimap escape frames are the
+        -- one dynamic exemption and have an O(1) ownership lookup.
+        local exempt = (force and self:IsCinematicBlackoutExempt(root))
+            or (not force and self.IsMinimapStackFrame and self:IsMinimapStackFrame(root))
+        if exempt then
             local current = SafeFrameAlpha(root)
             if current == nil then
                 runtime.pendingRestore[root] = record.baseAlpha
@@ -897,7 +1069,7 @@ function ns:ReconcileCinematicOwnership()
     -- Release anything that just became an explicit rule-owned exception,
     -- then update the native role layer and acquire newly unowned branches in
     -- the same synchronous editor mutation.
-    self:UpdateCinematicBlackout()
+    self:UpdateCinematicBlackout(true)
     if InCombatLockdown() then
         runtime.cinematicScanPending = true
         return
@@ -918,6 +1090,8 @@ function ns:EndCinematicBlackout()
     end
     runtime.cinematicBlackoutCount = 0
     runtime.cinematicRootScanAt = 0
+    runtime.cinematicAuditAt = 0
+    runtime.cinematicRevealActive = nil
 end
 
 function ns:GetCinematicComponentMode(id)
@@ -970,7 +1144,8 @@ function ns:ResetCinematicProfile()
         for id in pairs(runtime.hovered) do runtime.hovered[id] = nil end
         for id in pairs(runtime.fadeOutStarted) do runtime.fadeOutStarted[id] = nil end
     end
-    profile.targets, profile.groups, profile.links = {}, {}, {}
+    for id in pairs(runtime.revealGoal) do runtime.revealGoal[id] = nil end
+    profile.targets, profile.groups, profile.links, profile.visibilityLinks = {}, {}, {}, {}
     profile.nextReactionID, profile.nextGroupID = 1, 1
     for _, component in ipairs(CINEMATIC_COMPONENTS) do
         profile.targets[component.id] = NewCinematicSettings(profile, component.default, component.rest)
@@ -1096,7 +1271,47 @@ function ns:AddTarget(id)
     return settings
 end
 
+function ns:CopyTargetRules(id)
+    local settings = self:GetTargetSettings(id)
+    if not settings then return false, "Use this frame before copying its rules." end
+    runtime.ruleClipboard = {
+        atRest = settings.atRest,
+        fadeDuration = settings.fadeDuration,
+        fadeDelay = settings.fadeDelay,
+        reactions = DeepCopy(settings.reactions or {}),
+        sourceID = id,
+    }
+    self:RefreshOptions()
+    return true
+end
+
+function ns:CanPasteTargetRules()
+    local clipboard = runtime.ruleClipboard
+    return type(clipboard) == "table" and type(clipboard.reactions) == "table"
+        and #clipboard.reactions <= self.MAX_REACTIONS_PER_TARGET
+end
+
+function ns:PasteTargetRules(id)
+    if not self:CanPasteTargetRules() then return false, "Copy valid frame rules first." end
+    local settings = self:GetTargetSettings(id, true)
+    local clipboard = runtime.ruleClipboard
+    settings.atRest = math.max(0, math.min(1, tonumber(clipboard.atRest) or 0.12))
+    settings.fadeDuration = math.max(0.05, math.min(2, tonumber(clipboard.fadeDuration) or 0.20))
+    settings.fadeDelay = math.max(0, math.min(5, tonumber(clipboard.fadeDelay) or 0.80))
+    settings.reactions = DeepCopy(clipboard.reactions)
+    for _, reaction in ipairs(settings.reactions) do reaction.id = self:NextReactionID() end
+    settings.cinematicMode = nil
+    runtime.normalized[settings] = nil
+    runtime.fadeOutStarted[id] = nil
+    runtime.revealGoal[id] = nil
+    runtime.immediateApply[id] = true
+    self:Wake()
+    self:RefreshOptions()
+    return true
+end
+
 function ns:RestoreControlledFrame(id)
+    runtime.revealGoal[id] = nil
     local frame = runtime.frameByID[id]
     if not frame then return end
     local target = self.TargetByID[id]
@@ -1160,6 +1375,7 @@ function ns:SelectProfile(name, preserveCinematicReturn)
     for id in pairs(runtime.active) do runtime.active[id] = nil end
     for id in pairs(runtime.hovered) do runtime.hovered[id] = nil end
     for id in pairs(runtime.fadeOutStarted) do runtime.fadeOutStarted[id] = nil end
+    for id in pairs(runtime.revealGoal) do runtime.revealGoal[id] = nil end
     for id in pairs(runtime.immediateApply) do runtime.immediateApply[id] = nil end
     db.profile = name
     if not preserveCinematicReturn and db.cinematic and db.cinematic.profileName ~= name then
@@ -1299,6 +1515,16 @@ function ns:ExportProfile(name)
             if #childIDs > 0 then lines[#lines + 1] = table.concat({ "L", EncodeField(parentID), EncodeField(table.concat(childIDs, ",")) }, "|") end
         end
     end
+    for _, parentID in ipairs(SortedKeys(profile.visibilityLinks)) do
+        local children = profile.visibilityLinks[parentID]
+        if type(children) == "table" and IsSafeImportID(parentID) then
+            local childIDs = {}
+            for _, childID in ipairs(SortedKeys(children)) do
+                if children[childID] == true and IsSafeImportID(childID) then childIDs[#childIDs + 1] = EncodeField(childID) end
+            end
+            if #childIDs > 0 then lines[#lines + 1] = table.concat({ "V", EncodeField(parentID), EncodeField(table.concat(childIDs, ",")) }, "|") end
+        end
+    end
     local body = table.concat(lines, "\n")
     local export = "PriorityFader-1:" .. ProfileChecksum(body) .. "\n" .. body
     local valid, reason = self:ParseProfileImport(export)
@@ -1314,8 +1540,9 @@ function ns:ParseProfileImport(text)
     local lines = {}
     for line in body:gmatch("[^\r\n]+") do lines[#lines + 1] = line end
     if lines[1] ~= "PF1" then return ImportFailure("This is not a Priority Fader profile export.") end
-    local profile = { targets = {}, groups = {}, links = {}, nextReactionID = 1, nextGroupID = 1 }
-    local reactionIDs, reactionsByTarget, memberToGroup, targetCount, reactionCount, groupCount, edgeCount = {}, {}, {}, 0, 0, 0, 0
+    local profile = { targets = {}, groups = {}, links = {}, visibilityLinks = {}, nextReactionID = 1, nextGroupID = 1 }
+    local reactionIDs, reactionsByTarget, memberToGroup, visibilityParentByChild = {}, {}, {}, {}
+    local targetCount, reactionCount, groupCount, edgeCount = 0, 0, 0, 0
     for index = 2, #lines do
         local fields = SplitFields(lines[index])
         local tag = fields[1]
@@ -1381,20 +1608,32 @@ function ns:ParseProfileImport(text)
             end
             if not next(children) then return ImportFailure("A link needs at least one child.") end
             profile.links[parentID] = children
+        elseif tag == "V" and #fields == 3 then
+            local parentID, childrenText = DecodeField(fields[2]), DecodeField(fields[3])
+            if not IsSafeImportID(parentID) or not profile.targets[parentID] or profile.visibilityLinks[parentID] then return ImportFailure("A visibility source is invalid.") end
+            local children = {}
+            for encodedChildID in (childrenText or ""):gmatch("[^,]+") do
+                local childID = DecodeField(encodedChildID)
+                if not IsSafeImportID(childID) or not profile.targets[childID] or childID == parentID
+                    or children[childID] or visibilityParentByChild[childID] then
+                    return ImportFailure("A visibility child is invalid or already follows another frame.")
+                end
+                children[childID], visibilityParentByChild[childID] = true, parentID
+                edgeCount = edgeCount + 1; if edgeCount > 500 then return ImportFailure("An import can contain at most 500 relationships.") end
+            end
+            if not next(children) then return ImportFailure("A visibility source needs at least one child.") end
+            profile.visibilityLinks[parentID] = children
         else
             return ImportFailure("The export contains an unknown entry.")
         end
     end
-    -- Connected frames need an unconditional hover fallback.  Do this before
-    -- accepting the profile so imported data can never be repaired past the
-    -- per-target reaction cap after it becomes active.
+    -- Reveal-group members need an unconditional hover row. Directional links
+    -- are independent of both frames' local scripts: the source is sampled by
+    -- the relationship itself, and the child may omit Mouseover so hovering it
+    -- does not reveal it independently.
     local connectionTargets = {}
     for _, group in pairs(profile.groups) do
         for memberID in pairs(group.members or {}) do connectionTargets[memberID] = true end
-    end
-    for parentID, children in pairs(profile.links) do
-        connectionTargets[parentID] = true
-        for childID in pairs(children) do connectionTargets[childID] = true end
     end
     for id in pairs(connectionTargets) do
         local hasFallback = false
@@ -1405,7 +1644,7 @@ function ns:ParseProfileImport(text)
             end
         end
         if not hasFallback then
-            return ImportFailure("Every connected frame needs an unconditional Mouseover reaction.")
+            return ImportFailure("Every reveal-group member needs an unconditional Mouseover reaction.")
         end
     end
     local function Reaches(id, sought, seen)
@@ -1417,6 +1656,20 @@ function ns:ParseProfileImport(text)
     end
     for parentID, children in pairs(profile.links) do
         for childID in pairs(children) do if Reaches(childID, parentID, {}) then return ImportFailure("The import contains a linked-frame loop.") end end
+    end
+    local function VisibilityReaches(id, sought, seen)
+        if id == sought then return true end
+        if seen[id] then return false end
+        seen[id] = true
+        for childID in pairs(profile.visibilityLinks[id] or {}) do
+            if VisibilityReaches(childID, sought, seen) then return true end
+        end
+        return false
+    end
+    for parentID, children in pairs(profile.visibilityLinks) do
+        for childID in pairs(children) do
+            if VisibilityReaches(childID, parentID, {}) then return ImportFailure("The import contains a visibility-inheritance loop.") end
+        end
     end
     return profile, { targets = targetCount, reactions = reactionCount }
 end
@@ -1435,11 +1688,13 @@ function ns:ImportProfile(name, text)
 end
 
 function ns:RemoveTarget(id)
+    self:InvalidateTargetTransition(id)
     self:RestoreControlledFrame(id)
     self:Profile().targets[id] = nil
     runtime.active[id] = nil
     runtime.hovered[id] = nil
     runtime.fadeOutStarted[id] = nil
+    runtime.revealGoal[id] = nil
     local profile = self:Profile()
     for key, group in pairs(profile.groups or {}) do
         if group.members then
@@ -1454,6 +1709,16 @@ function ns:RemoveTarget(id)
         else
             children[id] = nil
             if not next(children) then profile.links[parentID] = nil end
+        end
+    end
+    for parentID, children in pairs(profile.visibilityLinks or {}) do
+        if parentID == id then
+            profile.visibilityLinks[parentID] = nil
+        elseif type(children) == "table" then
+            children[id] = nil
+            if not next(children) then profile.visibilityLinks[parentID] = nil end
+        else
+            profile.visibilityLinks[parentID] = nil
         end
     end
     if self.ConnectionPicker and self.ConnectionPicker:IsShown() and self.ConnectionPicker.sourceID == id then
@@ -1584,19 +1849,11 @@ end
 function ns:AddLink(parentID, childID)
     local allowed, reason = self:CanAddLink(parentID, childID)
     if not allowed then return false, reason end
-    allowed, reason = self:CanEnsureMouseoverReaction(parentID)
-    if not allowed then return false, reason end
-    allowed, reason = self:CanEnsureMouseoverReaction(childID)
-    if not allowed then return false, reason end
     local links = self:Profile().links
     links[parentID] = links[parentID] or {}
     links[parentID][childID] = true
     self:AddTarget(parentID)
     self:AddTarget(childID)
-    allowed, reason = self:EnsureMouseoverReaction(parentID)
-    if not allowed then return false, reason end
-    allowed, reason = self:EnsureMouseoverReaction(childID)
-    if not allowed then return false, reason end
     return true
 end
 
@@ -1605,11 +1862,81 @@ function ns:HasHoverConnection(id)
     return group ~= nil or next(self:GetLinkedChildren(id)) ~= nil or #self:GetLinkParents(id) > 0
 end
 
+function ns:RequiresUnconditionalMouseover(id)
+    local _, group = self:GetRevealGroup(id)
+    return group ~= nil
+end
+
+function ns:GetVisibilityChildren(parentID)
+    return self:Profile().visibilityLinks[parentID] or {}
+end
+
+function ns:GetVisibilityParent(childID)
+    for parentID, children in pairs(self:Profile().visibilityLinks or {}) do
+        if type(children) == "table" and children[childID] == true then return parentID end
+    end
+end
+
+function ns:RemoveVisibilityLink(parentID, childID)
+    local links = self:Profile().visibilityLinks
+    if type(links[parentID]) ~= "table" then return end
+    links[parentID][childID] = nil
+    if not next(links[parentID]) then links[parentID] = nil end
+    self:InvalidateTargetTransition(childID)
+    self:RefreshOptions()
+end
+
+function ns:CanAddVisibilityLink(parentID, childID)
+    if parentID == childID then return false, "A frame cannot inherit its own visibility." end
+    local links = self:Profile().visibilityLinks
+    local function Reaches(from, sought, seen)
+        if from == sought then return true end
+        if seen[from] then return false end
+        seen[from] = true
+        for nextID in pairs(type(links[from]) == "table" and links[from] or {}) do
+            if Reaches(nextID, sought, seen) then return true end
+        end
+        return false
+    end
+    if Reaches(childID, parentID, {}) then return false, "That visibility relationship would create a loop." end
+    return true
+end
+
+function ns:AddVisibilityLink(parentID, childID)
+    local allowed, reason = self:CanAddVisibilityLink(parentID, childID)
+    if not allowed then return false, reason end
+    local profile = self:Profile()
+    local childWasManaged = profile.targets[childID] ~= nil
+    self:AddTarget(parentID)
+    self:AddTarget(childID)
+    if not childWasManaged then
+        -- A frame linked for the first time should genuinely follow its parent.
+        -- The ordinary Mouseover/Combat starter rows would otherwise shadow
+        -- inheritance immediately. Users can add deliberate local overrides
+        -- afterward; already-configured children keep their existing rules.
+        local childSettings = profile.targets[childID]
+        childSettings.reactions = {}
+        childSettings.cinematicMode = nil
+        runtime.normalized[childSettings] = nil
+    end
+    local oldParent = self:GetVisibilityParent(childID)
+    if oldParent and oldParent ~= parentID then self:RemoveVisibilityLink(oldParent, childID) end
+    local links = profile.visibilityLinks
+    links[parentID] = type(links[parentID]) == "table" and links[parentID] or {}
+    links[parentID][childID] = true
+    self:InvalidateTargetTransition(childID)
+    self:Wake()
+    self:RefreshOptions()
+    return true, childWasManaged
+        and "Linked. Existing local rules still run before the parent."
+        or "Linked as a clean follower. Add local rules only for exceptions."
+end
+
 function ns:EnsureConnectedHoverRules()
     local profile = self:Profile()
     local allSafe = true
     for id in pairs(profile.targets) do
-        if self:HasHoverConnection(id) then
+        if self:RequiresUnconditionalMouseover(id) then
             local safe = self:EnsureMouseoverReaction(id)
             if not safe then allSafe = false end
         end
@@ -1677,6 +2004,7 @@ function ns:BuildStateContext()
     context.control = SafeBoolean(IsControlKeyDown)
     context.alt = SafeBoolean(IsAltKeyDown)
     context.dead = SafeBoolean(UnitIsDeadOrGhost, "player")
+    context.casting = runtime.playerCasting == true
     context.mounted = SafeBoolean(IsMounted)
     context.flying = SafeBoolean(IsFlying)
     context.swimming = SafeBoolean(IsSwimming)
@@ -1731,10 +2059,29 @@ function ns:ReactionIsMet(reaction, id)
     return true
 end
 
-function ns:Evaluate(id, settings)
+local LINKED_PARENT_HOVER_REACTION = { condition = "linked_parent_hover", opacity = 1, requirements = {}, linkedParent = true }
+
+function ns:Evaluate(id, settings, seen)
+    -- Parent hover is an intrinsic part of a directional link. A child only
+    -- needs its own Mouseover row when it should also reveal itself. Existing
+    -- links retain their generated row and therefore keep their old behavior;
+    -- removing that row opts into parent-only reveal.
+    if not self:HasUnconditionalMouseover(settings) and self:IsLinkedParentHovered(id) then
+        return 1, 0, LINKED_PARENT_HOVER_REACTION
+    end
     for index, reaction in ipairs(settings.reactions or {}) do
         if self:ReactionIsMet(reaction, id) then
             return reaction.opacity or 1, index, reaction
+        end
+    end
+    seen = seen or {}
+    if not seen[id] then
+        seen[id] = true
+        local parentID = self:GetVisibilityParent(id)
+        local parentSettings = parentID and self:GetTargetSettings(parentID)
+        if parentSettings and parentSettings.enabled ~= false and not seen[parentID] then
+            local opacity, index, reaction, inheritedFrom = self:Evaluate(parentID, parentSettings, seen)
+            return opacity, index, reaction, inheritedFrom or parentID
         end
     end
     return settings.atRest or 0.12, nil, nil
@@ -1824,6 +2171,11 @@ function ns:IsConnectionHovered(id)
             end
         end
     end
+    return self:IsLinkedParentHovered(id)
+end
+
+function ns:IsLinkedParentHovered(id)
+    local profile = self:Profile()
     local function AncestorHovered(childID, seen)
         if seen[childID] then return false end
         seen[childID] = true
@@ -1866,24 +2218,33 @@ end
 
 function ns:ApplyTarget(id, elapsed)
     local settings = self:GetTargetSettings(id)
-    if not settings or not settings.enabled then return end
+    if not settings or not settings.enabled then
+        runtime.fadeOutStarted[id] = nil
+        runtime.revealGoal[id] = nil
+        return
+    end
     local frame, target = self:ResolveTarget(id)
     local previous = runtime.frameByID[id]
     if previous and previous ~= frame then self:RestoreControlledFrame(id) end
     if not frame then
         runtime.fadeOutStarted[id] = nil
+        runtime.revealGoal[id] = nil
         runtime.active[id] = { unavailable = true }
         return
     end
     -- A profile switch may be waiting to restore this provider frame's old
     -- alpha. Do that first; never capture an old faded alpha as the new base.
     if not self:RestorePendingFrame(frame) then
+        runtime.fadeOutStarted[id] = nil
+        runtime.revealGoal[id] = nil
         runtime.active[id] = { pendingRestore = true }
         return
     end
     if previous ~= frame and target and target.acquire then
         local acquired, usable = pcall(target.acquire, frame)
         if not acquired or usable == false then
+            runtime.fadeOutStarted[id] = nil
+            runtime.revealGoal[id] = nil
             runtime.active[id] = { unavailable = true }
             return
         end
@@ -1891,11 +2252,13 @@ function ns:ApplyTarget(id, elapsed)
     runtime.frameByID[id] = frame
     runtime.managedIDByFrame[frame] = id
     if not (target and target.skipManagedAlphaHook) then self:HookManagedFrameAlpha(frame) end
-    local desired, index, reaction = self:Evaluate(id, settings)
+    local desired, index, reaction, inheritedFrom = self:Evaluate(id, settings)
     local current = runtime.currentAlpha[frame]
     if current == nil then
         current = SafeFrameAlpha(frame)
         if current == nil then
+            runtime.fadeOutStarted[id] = nil
+            runtime.revealGoal[id] = nil
             runtime.active[id] = { hostHidden = true }
             return
         end
@@ -1911,6 +2274,46 @@ function ns:ApplyTarget(id, elapsed)
             runtime.baseAlpha[frame] = live
             runtime.currentAlpha[frame] = live
             current = live
+        end
+    end
+    -- A short-lived reveal is a complete visual action, not merely a sample
+    -- of the condition's current value. Once opacity starts rising, finish at
+    -- that rule's requested opacity even if Moving, Casting, Has target, etc.
+    -- turns false first. Only then may the normal wait and fade-out begin.
+    local revealGoal = runtime.revealGoal[id]
+    if desired > current + 0.001 and (not revealGoal or desired > revealGoal.opacity + 0.001) then
+        revealGoal = {
+            opacity = desired,
+            index = index,
+            reaction = reaction,
+            inheritedFrom = inheritedFrom,
+        }
+        runtime.revealGoal[id] = revealGoal
+    end
+    if revealGoal then
+        -- A newly matching row above the committed row is still authoritative.
+        -- This preserves the editor's first-match contract (for example a
+        -- leading Mounted -> 0% suppressor) while an ended condition falling
+        -- through to a later row/Otherwise still completes its reveal.
+        local localRulePreemptsInherited = revealGoal.inheritedFrom and not inheritedFrom
+        local earlierRulePreempts = inheritedFrom == revealGoal.inheritedFrom
+            and index and revealGoal.index and index < revealGoal.index
+        if desired < revealGoal.opacity and (localRulePreemptsInherited or earlierRulePreempts) then
+            runtime.revealGoal[id] = nil
+            revealGoal = nil
+        end
+    end
+    if revealGoal then
+        if current < revealGoal.opacity - 0.001 then
+            if desired < revealGoal.opacity then
+                desired = revealGoal.opacity
+                index = revealGoal.index
+                reaction = revealGoal.reaction
+                inheritedFrom = revealGoal.inheritedFrom
+            end
+        else
+            runtime.revealGoal[id] = nil
+            revealGoal = nil
         end
     end
     if not SafeFrameShown(frame) then
@@ -1930,6 +2333,7 @@ function ns:ApplyTarget(id, elapsed)
             desired = desired,
             index = index,
             reaction = reaction,
+            inheritedFrom = inheritedFrom,
             hostHidden = true,
             protected = target and target.protected,
         }
@@ -1938,6 +2342,7 @@ function ns:ApplyTarget(id, elapsed)
     if runtime.immediateApply[id] then
         runtime.immediateApply[id] = nil
         runtime.fadeOutStarted[id] = nil
+        runtime.revealGoal[id] = nil
         if math.abs(current - desired) > 0.001 and SetManagedFrameAlpha(frame, desired) then
             current = desired
             runtime.currentAlpha[frame] = desired
@@ -1947,6 +2352,7 @@ function ns:ApplyTarget(id, elapsed)
             desired = desired,
             index = index,
             reaction = reaction,
+            inheritedFrom = inheritedFrom,
             hostHidden = false,
             protected = target and target.protected,
         }
@@ -1958,7 +2364,7 @@ function ns:ApplyTarget(id, elapsed)
         -- so a live delay edit takes effect immediately without restarting it.
         runtime.fadeOutStarted[id] = runtime.fadeOutStarted[id] or now
         if now < runtime.fadeOutStarted[id] + settings.fadeDelay then
-            runtime.active[id] = { alpha = current, desired = desired, index = index, reaction = reaction, hostHidden = false, protected = target and target.protected }
+            runtime.active[id] = { alpha = current, desired = desired, index = index, reaction = reaction, inheritedFrom = inheritedFrom, hostHidden = false, protected = target and target.protected }
             return
         end
     else
@@ -1977,6 +2383,7 @@ function ns:ApplyTarget(id, elapsed)
         desired = desired,
         index = index,
         reaction = reaction,
+        inheritedFrom = inheritedFrom,
         hostHidden = false,
         protected = target and target.protected,
     }
@@ -2002,13 +2409,6 @@ function ns:Tick(elapsed)
     if now - runtime.lastTick < 0.05 then return end
     local delta = now - runtime.lastTick
     runtime.lastTick = now
-    local cdmGeneration = self.GetExperimentalCDMGeneration and self:GetExperimentalCDMGeneration() or nil
-    if self.RefreshExperimentalCDMTargets and (cdmGeneration ~= runtime.lastCDMGeneration
-        or now - (runtime.lastCDMRefresh or 0) >= 1) then
-        runtime.lastCDMRefresh = now
-        runtime.lastCDMGeneration = cdmGeneration
-        self:RefreshExperimentalCDMTargets()
-    end
     if now - runtime.lastMouseTick >= 0.08 then
         runtime.lastMouseTick = now
         self:UpdateHover()
@@ -2029,7 +2429,7 @@ function ns:Tick(elapsed)
             local reveal = runtime.cinematicPickerReveal or (IsAltKeyDown and IsAltKeyDown()) or false
             self:SetCinematicUIMode(self:CanUseCinematicNativeMode() and not reveal)
         end
-        if not InCombatLockdown() and now - (runtime.cinematicRootScanAt or 0) >= 1 then
+        if not InCombatLockdown() and now - (runtime.cinematicRootScanAt or 0) >= 2.5 then
             self:BeginCinematicBlackout()
         else
             self:UpdateCinematicBlackout()
@@ -2063,11 +2463,13 @@ function ns:RunDiagnostics()
     local targets = type(profile.targets) == "table" and profile.targets or {}
     local groups = type(profile.groups) == "table" and profile.groups or {}
     local links = type(profile.links) == "table" and profile.links or {}
-    local configured, configuredAvailable, groupCount, linkCount = 0, 0, 0, 0
+    local visibilityLinks = type(profile.visibilityLinks) == "table" and profile.visibilityLinks or {}
+    local configured, configuredAvailable, groupCount, linkCount, visibilityCount = 0, 0, 0, 0, 0
     local issues, groupMembers, connected = {}, {}, {}
     if profile.targets ~= targets then issues[#issues + 1] = "Target settings are malformed." end
     if profile.groups ~= groups then issues[#issues + 1] = "Reveal groups are malformed." end
     if profile.links ~= links then issues[#issues + 1] = "Frame links are malformed." end
+    if profile.visibilityLinks ~= visibilityLinks then issues[#issues + 1] = "Visibility inheritance is malformed." end
     for id, settings in pairs(targets) do
         configured = configured + 1
         if type(id) ~= "string" then
@@ -2104,7 +2506,6 @@ function ns:RunDiagnostics()
         if type(parentID) ~= "string" then
             issues[#issues + 1] = "A link source id is not a string."
         else
-            connected[parentID] = true
             if not targets[parentID] then issues[#issues + 1] = "Link source " .. DiagnosticID(parentID) .. " is not controlled." end
         end
         if children ~= childTable then issues[#issues + 1] = "Linked children for " .. DiagnosticID(parentID) .. " are malformed." end
@@ -2114,7 +2515,6 @@ function ns:RunDiagnostics()
                 issues[#issues + 1] = "A linked child id is not a string."
             else
                 if childID == parentID then issues[#issues + 1] = "Link " .. DiagnosticID(parentID) .. " points to itself." end
-                connected[childID] = true
                 if not targets[childID] then issues[#issues + 1] = "Linked child " .. DiagnosticID(childID) .. " is not controlled." end
             end
         end
@@ -2136,12 +2536,53 @@ function ns:RunDiagnostics()
             break
         end
     end
+    local visibilityParent = {}
+    for parentID, children in pairs(visibilityLinks) do
+        local childTable = type(children) == "table" and children or {}
+        if type(parentID) ~= "string" then
+            issues[#issues + 1] = "A visibility source id is not a string."
+        elseif not targets[parentID] then
+            issues[#issues + 1] = "Visibility source " .. DiagnosticID(parentID) .. " is not controlled."
+        end
+        if children ~= childTable then issues[#issues + 1] = "Visibility children for " .. DiagnosticID(parentID) .. " are malformed." end
+        for childID, enabled in pairs(childTable) do
+            visibilityCount = visibilityCount + 1
+            if type(childID) ~= "string" or enabled ~= true then
+                issues[#issues + 1] = "A visibility child entry is malformed."
+            else
+                if childID == parentID then issues[#issues + 1] = "Visibility source " .. DiagnosticID(parentID) .. " points to itself." end
+                if not targets[childID] then issues[#issues + 1] = "Visibility child " .. DiagnosticID(childID) .. " is not controlled." end
+                if visibilityParent[childID] and visibilityParent[childID] ~= parentID then
+                    issues[#issues + 1] = "Visibility child " .. DiagnosticID(childID) .. " has more than one parent."
+                else
+                    visibilityParent[childID] = parentID
+                end
+            end
+        end
+    end
+    local visibilityVisiting, visibilityVisited = {}, {}
+    local function HasVisibilityCycle(id)
+        if visibilityVisiting[id] then return true end
+        if visibilityVisited[id] then return false end
+        visibilityVisiting[id] = true
+        for childID in pairs(type(visibilityLinks[id]) == "table" and visibilityLinks[id] or {}) do
+            if HasVisibilityCycle(childID) then return true end
+        end
+        visibilityVisiting[id] = nil; visibilityVisited[id] = true
+        return false
+    end
+    for parentID in pairs(visibilityLinks) do
+        if HasVisibilityCycle(parentID) then
+            issues[#issues + 1] = "Visibility-inheritance graph contains a loop."
+            break
+        end
+    end
     for id in pairs(connected) do
         local settings, hasMouseover = targets[id], false
         for _, reaction in ipairs(type(settings) == "table" and type(settings.reactions) == "table" and settings.reactions or {}) do
             if type(reaction) == "table" and reaction.condition == "mouseover" and #(type(reaction.requirements) == "table" and reaction.requirements or {}) == 0 then hasMouseover = true; break end
         end
-        if not hasMouseover then issues[#issues + 1] = "Connected target " .. DiagnosticID(id) .. " lacks an unconditional Mouseover reaction." end
+        if not hasMouseover then issues[#issues + 1] = "Reveal-group member " .. DiagnosticID(id) .. " lacks an unconditional Mouseover reaction." end
     end
     local adapterAvailable, adapterUnavailable, unavailable = 0, 0, {}
     for _, target in ipairs(self.Targets) do
@@ -2154,7 +2595,7 @@ function ns:RunDiagnostics()
         end
     end
     DiagnosticMessage("v" .. self.VERSION .. " | Profile: " .. (db.profile or "Default"), self.COLORS.teal)
-    DiagnosticMessage("Configured: " .. configuredAvailable .. "/" .. configured .. " currently available | Relationships: " .. groupCount .. " groups, " .. linkCount .. " links.", self.COLORS.muted)
+    DiagnosticMessage("Configured: " .. configuredAvailable .. "/" .. configured .. " currently available | Relationships: " .. groupCount .. " groups, " .. linkCount .. " hover links, " .. visibilityCount .. " visibility links.", self.COLORS.muted)
     DiagnosticMessage("Adapters: " .. adapterAvailable .. " available, " .. adapterUnavailable .. " unavailable.", adapterUnavailable > 0 and self.COLORS.amber or self.COLORS.teal)
     if #issues == 0 then
         DiagnosticMessage("Saved profile graph is consistent.", self.COLORS.teal)
@@ -2165,6 +2606,16 @@ function ns:RunDiagnostics()
     end
     for index = 1, math.min(6, #unavailable) do DiagnosticMessage("Waiting: " .. unavailable[index], self.COLORS.muted) end
     if #unavailable > 6 then DiagnosticMessage("Waiting: " .. (#unavailable - 6) .. " more adapter(s).", self.COLORS.muted) end
+end
+
+local function RefreshPlayerCastingState()
+    local ok, casting = pcall(function()
+        local castName = type(UnitCastingInfo) == "function" and UnitCastingInfo("player") or nil
+        if castName ~= nil then return true end
+        local channelName = type(UnitChannelInfo) == "function" and UnitChannelInfo("player") or nil
+        return channelName ~= nil
+    end)
+    if ok and not IsSecret(casting) then runtime.playerCasting = casting == true end
 end
 
 local driver = CreateFrame("Frame")
@@ -2188,6 +2639,15 @@ driver:RegisterEvent("PET_BATTLE_OPENING_START")
 driver:RegisterEvent("PET_BATTLE_CLOSE")
 driver:RegisterEvent("CHAT_MSG_LOOT")
 driver:RegisterEvent("UPDATE_BINDINGS")
+driver:RegisterEvent("UNIT_SPELLCAST_START")
+driver:RegisterEvent("UNIT_SPELLCAST_STOP")
+driver:RegisterEvent("UNIT_SPELLCAST_FAILED")
+driver:RegisterEvent("UNIT_SPELLCAST_FAILED_QUIET")
+driver:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
+driver:RegisterEvent("UNIT_SPELLCAST_CHANNEL_START")
+driver:RegisterEvent("UNIT_SPELLCAST_CHANNEL_STOP")
+pcall(driver.RegisterEvent, driver, "UNIT_SPELLCAST_EMPOWER_START")
+pcall(driver.RegisterEvent, driver, "UNIT_SPELLCAST_EMPOWER_STOP")
 for event in pairs(EVENT_TO_MOMENT) do driver:RegisterEvent(event) end
 
 function ns:Wake()
@@ -2197,33 +2657,56 @@ function ns:Wake()
 end
 
 driver:SetScript("OnEvent", function(_, event, ...)
+    if event:match("^UNIT_SPELLCAST_") then
+        local unit = ...
+        if type(unit) == "string" and not IsSecret(unit) and unit == "player" then
+            if event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START"
+                or event == "UNIT_SPELLCAST_EMPOWER_START" then
+                runtime.playerCasting = true
+            elseif event == "UNIT_SPELLCAST_STOP" or event == "UNIT_SPELLCAST_FAILED"
+                or event == "UNIT_SPELLCAST_FAILED_QUIET" or event == "UNIT_SPELLCAST_INTERRUPTED"
+                or event == "UNIT_SPELLCAST_CHANNEL_STOP" or event == "UNIT_SPELLCAST_EMPOWER_STOP" then
+                runtime.playerCasting = false
+            end
+            -- Some stop/start pairs arrive in the same update (for example when a
+            -- normal cast flows into a channel). Re-read on the next frame so the
+            -- condition reflects the player's final casting state, not event order.
+            C_Timer.After(0, RefreshPlayerCastingState)
+        end
+    end
     if event == "PLAYER_LOGIN" then
         PriorityFaderDB = CopyDefaults(DEFAULTS, PriorityFaderDB)
         ns:MigrateDatabase()
         if ns.RegisterStoredCustomFrames then ns:RegisterStoredCustomFrames() end
-        if ns.RefreshExperimentalCDMTargets then ns:RefreshExperimentalCDMTargets() end
         ns:EnsureCinematicProfile()
         if ns.RefreshOPieFrames then ns:RefreshOPieFrames() end
         ns:RegisterCinematicUIMode()
         ns:EnsureConnectedHoverRules()
+        RefreshPlayerCastingState()
         ns:Wake()
         ns:CreateOptions()
         if ns:IsCinematicActive() then
             ns:PrimeCinematicTargets()
             ns:SetCinematicUIMode(ns:CanUseCinematicNativeMode())
             ns:BeginCinematicBlackout()
-            C_Timer.After(0.5, function() if ns:IsCinematicActive() then ns:BeginCinematicBlackout() end end)
         end
         return
     end
     if event == "ADDON_LOADED" then
         if ns.RefreshOPieFrames then ns:RefreshOPieFrames() end
-        if ns.RefreshExperimentalCDMTargets then ns:RefreshExperimentalCDMTargets() end
         if ns:IsCinematicActive() and not InCombatLockdown() then
-            ns:BeginCinematicBlackout()
-            C_Timer.After(0.1, function() if ns:IsCinematicActive() then ns:BeginCinematicBlackout() end end)
+            -- Load-on-demand addons often arrive in bursts. Coalesce them so
+            -- Cinematic discovers their roots once after the burst instead of
+            -- rescanning the entire UI twice for every ADDON_LOADED event.
+            runtime.cinematicRescanToken = (runtime.cinematicRescanToken or 0) + 1
+            local token = runtime.cinematicRescanToken
+            C_Timer.After(0.35, function()
+                if token == runtime.cinematicRescanToken and ns:IsCinematicActive()
+                    and not InCombatLockdown() then ns:BeginCinematicBlackout() end
+            end)
         end
     end
+    if event == "PLAYER_ENTERING_WORLD" then RefreshPlayerCastingState() end
     if ns.CancelPicker and (event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_ENTERING_WORLD" or event == "PET_BATTLE_OPENING_START") then
         ns:CancelPicker(event == "PLAYER_REGEN_DISABLED" and "combat" or "interrupted")
     end
@@ -2246,7 +2729,6 @@ driver:SetScript("OnEvent", function(_, event, ...)
     end
     if event == "PLAYER_ENTERING_WORLD" and ns:IsCinematicActive() and not InCombatLockdown() then
         ns:BeginCinematicBlackout()
-        C_Timer.After(0.5, function() if ns:IsCinematicActive() then ns:BeginCinematicBlackout() end end)
     end
     if event == "UPDATE_BINDINGS" and ns.CinematicOptions and ns.CinematicOptions:IsShown() then
         ns:RenderCinematicOptions()

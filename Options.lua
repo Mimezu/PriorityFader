@@ -1,16 +1,168 @@
 local ADDON, ns = ...
 local C = ns.COLORS
 
+local BASE_ACCENT = { C.accent[1], C.accent[2], C.accent[3], C.accent[4] }
+local BASE_BORDER = { C.border[1], C.border[2], C.border[3], C.border[4] }
+local CINEMATIC_ACCENT = C.cinematic or { 0.90, 0.52, 0.24, 1 }
+local CINEMATIC_BORDER = { 0.52, 0.29, 0.13, 0.88 }
+local CINEMATIC_BUTTON = { 0.14, 0.085, 0.045, 1 }
+local NORMAL_HEADER = { 0.085, 0.055, 0.14, 1 }
+local themeObjects = setmetatable({}, { __mode = "k" })
+
+local function TrackTheme(object, role)
+    if not object then return end
+    local roles = themeObjects[object] or {}
+    roles[role] = true
+    themeObjects[object] = roles
+end
+
 local function Backdrop(frame, color, border)
+    local actualColor, actualBorder = color or C.card, border or C.border
+    if actualColor == C.accent then TrackTheme(frame, "background") end
+    if actualBorder == C.accent then TrackTheme(frame, "accentBorder") end
+    if actualBorder == C.border then TrackTheme(frame, "border") end
     frame:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
-    frame:SetBackdropColor(unpack(color or C.card))
-    frame:SetBackdropBorderColor(unpack(border or C.border))
+    frame:SetBackdropColor(unpack(actualColor))
+    frame:SetBackdropBorderColor(unpack(actualBorder))
+end
+
+-- Resonance-style scrollbars: a quiet inset rail with a slim, draggable
+-- lavender thumb. The stock template's oversized arrows are hidden, and the
+-- replacement lives in the gutter already reserved inside each card so it
+-- never paints across the card border.
+local function SkinScrollFrame(scroll)
+    if not scroll or scroll._frameGambitScrollBar then return end
+
+    local stock = scroll.ScrollBar or scroll.scrollBar
+    if not stock and scroll.GetName and scroll:GetName() then
+        stock = _G[scroll:GetName() .. "ScrollBar"]
+    end
+    if stock then
+        stock:SetAlpha(0)
+        stock:EnableMouse(false)
+        stock:Hide()
+    end
+
+    scroll:EnableMouseWheel(true)
+    if scroll.SetClipsChildren then scroll:SetClipsChildren(true) end
+
+    local track = CreateFrame("Button", nil, scroll:GetParent(), "BackdropTemplate")
+    track:SetPoint("TOPLEFT", scroll, "TOPRIGHT", 4, 0)
+    track:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", 4, 0)
+    track:SetWidth(12)
+    track:SetFrameLevel(scroll:GetFrameLevel() + 8)
+    track:EnableMouse(true)
+    Backdrop(track, { 0.025, 0.03, 0.05, 0.78 }, { 0.20, 0.15, 0.34, 0.65 })
+
+    local rail = track:CreateTexture(nil, "BACKGROUND")
+    rail:SetTexture("Interface\\Buttons\\WHITE8X8")
+    rail:SetVertexColor(C.border[1], C.border[2], C.border[3], 0.44)
+    rail:SetPoint("TOP", 0, -3)
+    rail:SetPoint("BOTTOM", 0, 3)
+    rail:SetWidth(2)
+
+    local thumb = CreateFrame("Button", nil, track, "BackdropTemplate")
+    thumb:SetSize(6, 34)
+    thumb:SetPoint("TOP", track, "TOP", 0, -2)
+    thumb:SetFrameLevel(track:GetFrameLevel() + 1)
+    thumb:EnableMouse(true)
+    thumb:RegisterForDrag("LeftButton")
+    Backdrop(thumb, { C.accent[1], C.accent[2], C.accent[3], 0.88 }, C.accent)
+
+    local dragging, dragStartY, dragStartScroll
+    local function Range()
+        return math.max(0, tonumber(scroll:GetVerticalScrollRange()) or 0)
+    end
+    local function UpdateThumb()
+        local maxScroll = Range()
+        local trackHeight = math.max(1, track:GetHeight() - 4)
+        if maxScroll <= 0 or trackHeight <= 1 then
+            track:Hide()
+            return
+        end
+        track:Show()
+        local visibleHeight = math.max(1, scroll:GetHeight())
+        local thumbHeight = math.min(trackHeight, math.max(28, trackHeight * visibleHeight / (visibleHeight + maxScroll)))
+        local travel = math.max(0, trackHeight - thumbHeight)
+        local ratio = math.max(0, math.min(1, (tonumber(scroll:GetVerticalScroll()) or 0) / maxScroll))
+        thumb:SetHeight(thumbHeight)
+        thumb:ClearAllPoints()
+        thumb:SetPoint("TOP", track, "TOP", 0, -2 - ratio * travel)
+    end
+    local function StopDrag()
+        if not dragging then return end
+        dragging = false
+        thumb:SetScript("OnUpdate", nil)
+        thumb:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 0.88)
+        thumb:SetBackdropBorderColor(unpack(C.accent))
+    end
+    local function BeginDrag()
+        local _, cursorY = GetCursorPosition()
+        local scale = math.max(0.001, scroll:GetEffectiveScale())
+        dragging = true
+        dragStartY = cursorY / scale
+        dragStartScroll = tonumber(scroll:GetVerticalScroll()) or 0
+        thumb:SetBackdropColor(unpack(C.teal))
+        thumb:SetBackdropBorderColor(unpack(C.teal))
+        thumb:SetScript("OnUpdate", function()
+            if not IsMouseButtonDown("LeftButton") then StopDrag(); return end
+            local _, currentY = GetCursorPosition()
+            local travel = math.max(1, track:GetHeight() - 4 - thumb:GetHeight())
+            local delta = dragStartY - currentY / math.max(0.001, scroll:GetEffectiveScale())
+            scroll:SetVerticalScroll(math.max(0, math.min(Range(), dragStartScroll + delta / travel * Range())))
+            UpdateThumb()
+        end)
+    end
+
+    thumb:SetScript("OnEnter", function(self)
+        if not dragging then
+            self:SetBackdropColor(C.teal[1], C.teal[2], C.teal[3], 0.88)
+            self:SetBackdropBorderColor(unpack(C.teal))
+        end
+    end)
+    thumb:SetScript("OnLeave", function(self)
+        if not dragging then
+            self:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 0.88)
+            self:SetBackdropBorderColor(unpack(C.accent))
+        end
+    end)
+    thumb:SetScript("OnDragStart", BeginDrag)
+    thumb:SetScript("OnDragStop", StopDrag)
+    thumb:SetScript("OnMouseDown", function(_, button) if button == "LeftButton" then BeginDrag() end end)
+    thumb:SetScript("OnMouseUp", StopDrag)
+
+    track:SetScript("OnMouseDown", function(_, button)
+        if button ~= "LeftButton" then return end
+        local _, cursorY = GetCursorPosition()
+        local scale = math.max(0.001, track:GetEffectiveScale())
+        local offset = (track:GetTop() or 0) - cursorY / scale - thumb:GetHeight() * 0.5
+        local travel = math.max(1, track:GetHeight() - 4 - thumb:GetHeight())
+        scroll:SetVerticalScroll(math.max(0, math.min(Range(), offset / travel * Range())))
+        UpdateThumb()
+        BeginDrag()
+    end)
+    track:SetScript("OnMouseUp", StopDrag)
+
+    scroll:SetScript("OnMouseWheel", function(self, delta)
+        local nextScroll = (tonumber(self:GetVerticalScroll()) or 0) - delta * 50
+        self:SetVerticalScroll(math.max(0, math.min(Range(), nextScroll)))
+        UpdateThumb()
+    end)
+    scroll:HookScript("OnVerticalScroll", UpdateThumb)
+    scroll:HookScript("OnScrollRangeChanged", UpdateThumb)
+    scroll:HookScript("OnSizeChanged", UpdateThumb)
+    scroll:HookScript("OnShow", function() C_Timer.After(0, UpdateThumb) end)
+    scroll._frameGambitScrollBar = track
+    scroll._frameGambitUpdateScrollBar = UpdateThumb
+    C_Timer.After(0, UpdateThumb)
 end
 
 local function Text(parent, template, value, color)
     local label = parent:CreateFontString(nil, "ARTWORK", template or "GameFontHighlightSmall")
     label:SetText(value or "")
-    label:SetTextColor(unpack(color or C.muted))
+    local actualColor = color or C.muted
+    if actualColor == C.accent then TrackTheme(label, "text") end
+    label:SetTextColor(unpack(actualColor))
     return label
 end
 
@@ -29,7 +181,10 @@ local function Button(parent, label, width, callback, primary)
             self:SetBackdropColor(unpack(self._selectedColor))
         else
             local selected = self._primary or self._selected
-            self:SetBackdropColor(selected and 0.72 or 0.12, selected and 0.57 or 0.12, selected and 1.0 or 0.18, 1)
+            local accent = C.accent
+            self:SetBackdropColor(selected and math.min(1, accent[1] * 1.12) or 0.12,
+                selected and math.min(1, accent[2] * 1.18) or 0.12,
+                selected and math.min(1, accent[3] * 1.12) or 0.18, 1)
         end
         if self._tooltipTitle then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -44,6 +199,51 @@ local function Button(parent, label, width, callback, primary)
     end)
     button:SetScript("OnClick", callback)
     return button
+end
+
+function ns:IsCinematicEditorTheme()
+    local panel = self.Options
+    return panel and (panel.cinematicView == true or self:IsCinematicActive()) or false
+end
+
+function ns:ApplyEditorTheme(force)
+    local cinematic = force
+    if cinematic == nil then cinematic = self:IsCinematicEditorTheme() end
+    -- Cinematic is an identity cue, not a complete recolor. Keep the normal
+    -- Resonance lavender controls and use warm amber only at scene boundaries.
+    for index = 1, 4 do C.accent[index], C.border[index] = BASE_ACCENT[index], BASE_BORDER[index] end
+    for object, roles in pairs(themeObjects) do
+        if roles.text and object.SetTextColor then pcall(object.SetTextColor, object, unpack(C.accent)) end
+        if roles.background and object.SetBackdropColor then pcall(object.SetBackdropColor, object, unpack(C.accent)) end
+        if roles.accentBorder and object.SetBackdropBorderColor then pcall(object.SetBackdropBorderColor, object, unpack(C.accent)) end
+        if roles.border and object.SetBackdropBorderColor then pcall(object.SetBackdropBorderColor, object, unpack(C.border)) end
+    end
+    local panel = self.Options
+    if panel then
+        -- The outer boundary is the persistent Cinematic editing cue. Give it
+        -- enough weight to read at a glance without recoloring every control.
+        panel:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = cinematic and 4 or 1,
+        })
+        panel:SetBackdropColor(unpack(C.panel))
+        panel:SetBackdropBorderColor(unpack(cinematic and CINEMATIC_BORDER or BASE_BORDER))
+    end
+    if panel and panel.header then
+        panel.header:SetBackdropColor(unpack(NORMAL_HEADER))
+    end
+    if panel and panel.cinematic then
+        panel.cinematic._selected = true
+        panel.cinematic._selectedColor = CINEMATIC_BUTTON
+        panel.cinematic:SetBackdropColor(unpack(CINEMATIC_BUTTON))
+        panel.cinematic:SetBackdropBorderColor(unpack(CINEMATIC_ACCENT))
+        panel.cinematic:GetFontString():SetTextColor(unpack(CINEMATIC_ACCENT))
+    end
+    if panel and panel.subtitle then
+        panel.subtitle:SetText(cinematic and "Fine-tuning Cinematic Mode - changes are live." or "Choose visible UI, then decide how present it should feel.")
+        panel.subtitle:SetTextColor(unpack(cinematic and CINEMATIC_ACCENT or C.muted))
+    end
 end
 
 local function ClearChildren(frame)
@@ -171,7 +371,7 @@ function ns:CreateOptions()
 
     local header = CreateFrame("Frame", nil, panel, "BackdropTemplate")
     header:SetPoint("TOPLEFT", 12, -12); header:SetPoint("TOPRIGHT", -12, -12); header:SetHeight(62)
-    Backdrop(header, { 0.085, 0.055, 0.14, 1 }, C.accent)
+    Backdrop(header, NORMAL_HEADER, C.accent); panel.header = header
     header:EnableMouse(true); header:RegisterForDrag("LeftButton")
     header:SetScript("OnDragStart", function() panel:StartMoving() end)
     header:SetScript("OnDragStop", function() panel:StopMovingOrSizing() end)
@@ -181,14 +381,18 @@ function ns:CreateOptions()
     title:SetPoint("TOPLEFT", icon, "TOPRIGHT", 10, -11)
     local subtitle = Text(header, "GameFontHighlightSmall", "Choose visible UI, then decide how present it should feel.", C.muted)
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
+    panel.subtitle = subtitle
     local pick = Button(header, "Choose frame", 98, function() ns:StartPicker() end, true)
     pick:SetPoint("RIGHT", -43, 0)
-    local profile = Button(header, "Profile: Default", 132, function() ns:OpenProfilePicker() end)
+    local profile = Button(header, "Profile: Default", 132, function()
+        if ns:IsCinematicActive() then ns:OpenCinematicOptions() else ns:OpenProfilePicker() end
+    end)
     profile:SetPoint("RIGHT", pick, "LEFT", -7, 0); profile:GetFontString():SetWidth(124); profile:GetFontString():SetWordWrap(false); panel.profile = profile
     local cinematic = Button(header, "Cinematic", 88, function()
         if panel.cinematicView then ns:CloseCinematicOptions() else ns:OpenCinematicOptions() end
     end)
     cinematic:SetPoint("RIGHT", profile, "LEFT", -7, 0); panel.cinematic = cinematic
+    SetTooltip(cinematic, "Cinematic Mode", "Open the immersive scene controls. Orange identifies Cinematic settings and its fine-tuning editor.")
     local peek = Button(header, "Peek", 58, function() ns:EnterEditorPeek() end)
     peek:SetPoint("RIGHT", cinematic, "LEFT", -7, 0)
     SetTooltip(peek, "Peek at the game", "Temporarily collapses the editor while keeping the selected frame outlined. Click the small return bar to continue editing.")
@@ -202,6 +406,32 @@ function ns:CreateOptions()
     Backdrop(targets, C.card)
     panel.targets = targets; targets._rows = {}
     local targetsTitle = Text(targets, "GameFontNormal", "Targets", C.teal); targetsTitle:SetPoint("TOPLEFT", 12, -11)
+    local managedOnly = Button(targets, "Managed", 70, function(self)
+        panel.managedOnly = not panel.managedOnly
+        if panel.managedOnly then
+            local profileTargets = ns:Profile().targets
+            local selectedSettings = panel.selected and profileTargets[panel.selected]
+            if not selectedSettings or selectedSettings.enabled == false then
+                panel.selected = nil
+                for _, target in ipairs(ns.Targets) do
+                    local settings = profileTargets[target.id]
+                    if settings and settings.enabled ~= false then panel.selected = target.id; break end
+                end
+            end
+        end
+        ns:RenderOptions()
+    end)
+    managedOnly:SetPoint("TOPRIGHT", -10, -7)
+    managedOnly:GetFontString():SetText("Managed")
+    SetTooltip(managedOnly, "Managed frames only", "Shows only frames controlled by the current profile - the entries marked with the teal ON indicator. This only filters the list; it never changes your rules.")
+    panel.managedOnlyButton = managedOnly
+    local treeView = Button(targets, "List", 52, function()
+        panel.treeView = not panel.treeView
+        ns:RenderTargetRail()
+    end)
+    treeView:SetPoint("RIGHT", managedOnly, "LEFT", -4, 0)
+    SetTooltip(treeView, "Target rail layout", "List keeps the discovery order. Tree places managed frames first and indents visibility children below their parent. In Tree mode, drag a managed card onto another to make it follow that frame.")
+    panel.treeViewButton = treeView
     local add = Button(targets, "+ Pick on screen", 166, function() ns:StartPicker() end)
     add:SetPoint("TOPLEFT", 12, -36)
     local scan = Button(targets, "Discover visible UI", 166, function()
@@ -218,7 +448,7 @@ function ns:CreateOptions()
     scan:SetPoint("TOPLEFT", 12, -63)
     local filter = CreateFrame("EditBox", nil, targets, "BackdropTemplate")
     filter:SetSize(166, 22); filter:SetPoint("TOPLEFT", 12, -91); filter:SetAutoFocus(false); filter:SetFontObject(GameFontHighlightSmall)
-    filter:SetTextInsets(8, 8, 0, 0); filter:SetTextColor(unpack(C.accent)); Backdrop(filter, C.cardAlt, C.border)
+    filter:SetTextInsets(8, 8, 0, 0); filter:SetTextColor(unpack(C.accent)); TrackTheme(filter, "text"); Backdrop(filter, C.cardAlt, C.border)
     local filterHint = Text(filter, "GameFontHighlightSmall", "Filter frames...", C.muted)
     filterHint:SetPoint("LEFT", 8, 0); filter.hint = filterHint
     filter:SetScript("OnEditFocusGained", function() filterHint:Hide() end)
@@ -237,6 +467,7 @@ function ns:CreateOptions()
     targetScroll:SetScript("OnMouseWheel", function(self, delta)
         self:SetVerticalScroll(math.max(0, math.min(self:GetVerticalScrollRange(), self:GetVerticalScroll() - delta * 45)))
     end)
+    SkinScrollFrame(targetScroll)
     targetContent._rows = {}; panel.targetContent = targetContent
 
     local center = CreateFrame("Frame", nil, panel, "BackdropTemplate")
@@ -245,7 +476,7 @@ function ns:CreateOptions()
     local centerTitle = Text(center, "GameFontNormal", "Choose a target", C.teal); centerTitle:SetPoint("TOPLEFT", 14, -12); panel.centerTitle = centerTitle
     local active = Text(center, "GameFontHighlightSmall", "", C.muted); active:SetPoint("TOPRIGHT", -14, -14); panel.active = active
     local reactionScroll = CreateFrame("ScrollFrame", nil, center, "UIPanelScrollFrameTemplate")
-    reactionScroll:SetPoint("TOPLEFT", 14, -43); reactionScroll:SetPoint("BOTTOMRIGHT", -29, 12); panel.reactionScroll = reactionScroll
+    reactionScroll:SetPoint("TOPLEFT", 14, -43); reactionScroll:SetPoint("BOTTOMRIGHT", -29, 44); panel.reactionScroll = reactionScroll
     local reactionContent = CreateFrame("Frame", nil, reactionScroll)
     reactionContent:SetSize(math.max(1, center:GetWidth() - 43), 1); reactionScroll:SetScrollChild(reactionContent)
     center:SetScript("OnSizeChanged", function(_, width)
@@ -255,7 +486,22 @@ function ns:CreateOptions()
     reactionScroll:SetScript("OnMouseWheel", function(self, delta)
         self:SetVerticalScroll(math.max(0, math.min(self:GetVerticalScrollRange(), self:GetVerticalScroll() - delta * 45)))
     end)
+    SkinScrollFrame(reactionScroll)
     reactionContent._rows = {}; panel.reactionContent = reactionContent
+    panel.copyRules = Button(center, "Copy rules", 82, function()
+        if not panel.selected then return end
+        local ok, reason = ns:CopyTargetRules(panel.selected)
+        panel.active:SetText(ok and "Rules copied" or reason); panel.active:SetTextColor(unpack(ok and C.teal or C.amber))
+    end)
+    panel.copyRules:SetPoint("BOTTOMRIGHT", -14, 10)
+    SetTooltip(panel.copyRules, "Copy frame rules", "Copies ordered reactions, opacity, Otherwise, and fade timing to PFader's in-addon clipboard. Relationships are not copied.")
+    panel.pasteRules = Button(center, "Paste rules", 82, function()
+        if not panel.selected then return end
+        local ok, reason = ns:PasteTargetRules(panel.selected)
+        panel.active:SetText(ok and "Rules pasted" or reason); panel.active:SetTextColor(unpack(ok and C.teal or C.amber))
+    end)
+    panel.pasteRules:SetPoint("RIGHT", panel.copyRules, "LEFT", -7, 0)
+    SetTooltip(panel.pasteRules, "Paste frame rules", "Replaces this frame's ordered reactions, opacity, Otherwise, and timing. It leaves hover and visibility relationships unchanged.")
 
     local presence = CreateFrame("Frame", nil, panel, "BackdropTemplate")
     presence:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -86); presence:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 48); presence:SetWidth(176)
@@ -269,10 +515,43 @@ function ns:CreateOptions()
         if panel.selected then ns:RemoveTarget(panel.selected); panel.selected = nil; ns:RenderOptions() end
     end)
     reset:SetPoint("BOTTOMRIGHT", -18, 14)
-    panel.mainFrames = { targets, center, presence, note, reset }
+    local forget
+    forget = Button(panel, "Remove from list", 108, function()
+        local id = panel.selected
+        if not id or not ns:CanForgetCustomTarget(id) then return end
+        if panel.forgetArmed ~= id then
+            panel.forgetArmed = id
+            panel.forgetToken = (panel.forgetToken or 0) + 1
+            local token = panel.forgetToken
+            forget:GetFontString():SetText("Confirm remove")
+            panel.active:SetText("Removes this discovered frame, its rules, and its relationships from every profile.")
+            panel.active:SetTextColor(unpack(C.amber))
+            C_Timer.After(4, function()
+                if panel.forgetToken == token then
+                    panel.forgetArmed = nil
+                    forget:GetFontString():SetText("Remove from list")
+                end
+            end)
+            return
+        end
+        panel.forgetArmed = nil
+        panel.forgetToken = (panel.forgetToken or 0) + 1
+        local ok, reason = ns:ForgetCustomTarget(id)
+        forget:GetFontString():SetText("Remove from list")
+        panel.active:SetText(reason or "")
+        panel.active:SetTextColor(unpack(ok and C.teal or C.amber))
+        ns:RenderOptions()
+    end)
+    forget:SetPoint("RIGHT", reset, "LEFT", -7, 0)
+    SetTooltip(forget, "Remove discovered frame", "Forgets a frame added through Pick on screen or Discover visible UI. This also removes its rules and relationships from every profile. Built-in adapters are never removed.")
+    panel.forgetTarget = forget
+    panel.mainFrames = { targets, center, presence, note, forget, reset }
     panel:SetScript("OnShow", function() ns:RenderOptions() end)
     panel:SetScript("OnHide", function()
         panel:StopMovingOrSizing()
+        panel.forgetArmed = nil
+        panel.forgetToken = (panel.forgetToken or 0) + 1
+        forget:GetFontString():SetText("Remove from list")
         if ns.ReactionPalette and ns.ReactionPalette:IsShown() then ns.ReactionPalette:Hide() end
         if ns.ConnectionPicker and ns.ConnectionPicker:IsShown() then ns.ConnectionPicker:Hide() end
         if ns.OpacityPicker and ns.OpacityPicker:IsShown() then ns.OpacityPicker:Hide() end
@@ -287,6 +566,7 @@ function ns:CreateOptions()
         ns:StopPreview()
         ns:CancelReactionDrag()
         if panel.peeking then ns:RefreshSelectionOutline() end
+        if not panel.peeking then ns:ApplyEditorTheme(false) end
     end)
     table.insert(UISpecialFrames, panel:GetName())
 end
@@ -329,6 +609,8 @@ local CINEMATIC_MODE_OPTIONS = {
     eui_player = { "context_hover", "target_hover", "combat_hover", "combat", "hover", "untouched" },
     eui_target = { "context_hover", "target_hover", "combat_hover", "combat", "hover", "untouched" },
     eui_main = { "combat_hover", "combat", "hover", "untouched" },
+    eui_castbar = { "casting", "combat_hover", "combat", "hover", "untouched" },
+    eui_resourcebars = { "combat", "combat_hover", "hover", "untouched" },
     minimap = { "hover", "untouched" },
     objectives = { "quest_hover", "hover", "untouched" },
     chat = { "loot_hover", "hover", "untouched" },
@@ -440,7 +722,7 @@ function ns:OpenCinematicModePicker(component)
         button:SetScript("OnClick", function()
             if current == "custom" and picker.confirmMode ~= modeID then
                 picker.confirmMode = modeID
-                picker.copy:SetText("This replaces your Advanced rules. Click the same mode again to confirm.")
+                picker.copy:SetText("This replaces your fine-tuned rules. Click the same mode again to confirm.")
                 picker.copy:SetTextColor(unpack(C.amber))
                 return
             end
@@ -471,7 +753,7 @@ function ns:CreateCinematicOptions()
     end); page.clear:SetPoint("RIGHT", page.shortcut, "LEFT", -6, 0)
     local scene = CreateFrame("Frame", nil, page, "BackdropTemplate"); scene:SetPoint("TOPLEFT", 16, -79); scene:SetPoint("BOTTOMLEFT", 16, 55); scene:SetWidth(390); Backdrop(scene, C.cardAlt, C.border); page.scene = scene
     local sceneTitle = Text(scene, "GameFontNormal", "Scene visibility", C.teal); sceneTitle:SetPoint("TOPLEFT", 12, -11)
-    local sceneCopy = Text(scene, "GameFontHighlightSmall", "Pick plain-language modes; Advanced rules remain available when you need them.", C.muted); sceneCopy:SetPoint("TOPLEFT", sceneTitle, "BOTTOMLEFT", 0, -3); sceneCopy:SetPoint("RIGHT", -12, 0); sceneCopy:SetWordWrap(true)
+    local sceneCopy = Text(scene, "GameFontHighlightSmall", "Pick plain-language modes, or fine-tune the Cinematic profile when you need exact ordered rules.", C.muted); sceneCopy:SetPoint("TOPLEFT", sceneTitle, "BOTTOMLEFT", 0, -3); sceneCopy:SetPoint("RIGHT", -12, 0); sceneCopy:SetWordWrap(true)
     page.rows = {}
     for index, component in ipairs(ns.CINEMATIC_COMPONENTS) do
         local componentData = component
@@ -482,7 +764,7 @@ function ns:CreateCinematicOptions()
     end
     local kept = CreateFrame("Frame", nil, page, "BackdropTemplate"); kept:SetPoint("TOPLEFT", scene, "TOPRIGHT", 12, 0); kept:SetPoint("TOPRIGHT", -16, -79); kept:SetHeight(122); Backdrop(kept, C.cardAlt, C.border)
     local keptTitle = Text(kept, "GameFontNormal", "Always left alone", C.teal); keptTitle:SetPoint("TOPLEFT", 12, -11)
-    local keptCopy = Text(kept, "GameFontHighlightSmall", "Enemy nameplates, OPie rings, loot displays, Dialogue UI quests, tooltips, and essential dialogs stay visible. Priority Fader never reparents or restyles them.", C.muted); keptCopy:SetPoint("TOPLEFT", keptTitle, "BOTTOMLEFT", 0, -5); keptCopy:SetPoint("RIGHT", -12, 0); keptCopy:SetJustifyH("LEFT"); keptCopy:SetWordWrap(true)
+    local keptCopy = Text(kept, "GameFontHighlightSmall", "Enemy nameplates, quick-action palettes (OPie or Quickdraw), loot displays, quest conversations (DialogueUI or Blizzard), tooltips, and essential dialogs stay visible. Priority Fader never reparents or restyles them.", C.muted); keptCopy:SetPoint("TOPLEFT", keptTitle, "BOTTOMLEFT", 0, -5); keptCopy:SetPoint("RIGHT", -12, 0); keptCopy:SetJustifyH("LEFT"); keptCopy:SetWordWrap(true)
     local future = CreateFrame("Frame", nil, page, "BackdropTemplate"); future:SetPoint("TOPLEFT", kept, "BOTTOMLEFT", 0, -12); future:SetPoint("TOPRIGHT", -16, 0); future:SetHeight(92); Backdrop(future, C.cardAlt, C.border)
     local futureTitle = Text(future, "GameFontNormal", "Other visible UI", C.teal); futureTitle:SetPoint("TOPLEFT", 12, -11)
     future.copy = Text(future, "GameFontHighlightSmall", "Blackout watches eligible UI branches, including addon windows that appear later. Rescan forces an immediate refresh.", C.muted); future.copy:SetPoint("TOPLEFT", futureTitle, "BOTTOMLEFT", 0, -5); future.copy:SetPoint("RIGHT", -12, 0); future.copy:SetJustifyH("LEFT"); future.copy:SetWordWrap(true)
@@ -491,13 +773,17 @@ function ns:CreateCinematicOptions()
     future.clear = Button(future, "Clear keeps", 76, function() ns:ClearCinematicKeeps(); ns:RenderCinematicOptions() end); future.clear:SetPoint("RIGHT", future.keep, "LEFT", -6, 0)
     page.blackout = future
     page.status = Text(page, "GameFontHighlightSmall", "", C.muted); page.status:SetPoint("BOTTOMLEFT", 16, 16); page.status:SetPoint("RIGHT", -230, 16); page.status:SetJustifyH("LEFT")
-    page.advanced = Button(page, "Advanced rules", 112, function()
+    page.advanced = Button(page, "Fine-tune profile", 124, function()
         if not ns:IsCinematicActive() then
-            page.status:SetText("Turn Cinematic Mode on before fine-tuning its live rules."); page.status:SetTextColor(unpack(C.amber))
-            return
+            local ok, reason = ns:ToggleCinematic()
+            if not ok then
+                page.status:SetText(reason or "Cinematic Mode could not be enabled for live fine-tuning."); page.status:SetTextColor(unpack(C.amber))
+                return
+            end
         end
         ns:CloseCinematicOptions()
-    end); page.advanced:SetPoint("BOTTOMRIGHT", -126, 12)
+    end)
+    SetTooltip(page.advanced, "Fine-tune Cinematic profile", "Opens the normal ordered-rule editor on the live Cinematic profile. If Cinematic is off, it is turned on first so you cannot accidentally edit another profile.")
     page.reset = Button(page, "Reset defaults", 106, function()
         if not page.resetArmed then
             page.resetArmed = true; page.resetToken = (page.resetToken or 0) + 1; local token = page.resetToken; page.reset:GetFontString():SetText("Confirm reset")
@@ -510,7 +796,7 @@ function ns:CreateCinematicOptions()
         page.resetArmed = nil; page.resetToken = (page.resetToken or 0) + 1; page.reset:GetFontString():SetText("Reset defaults")
         ns:ResetCinematicProfile(); page.status:SetText("Cinematic defaults restored."); page.status:SetTextColor(unpack(C.teal)); ns:RenderCinematicOptions()
     end); page.reset:SetPoint("BOTTOMRIGHT", -14, 12)
-    page.back = Button(page, "Rules", 58, function() ns:CloseCinematicOptions() end); page.back:SetPoint("BOTTOMRIGHT", page.advanced, "BOTTOMLEFT", -7, 0)
+    page.advanced:SetPoint("RIGHT", page.reset, "LEFT", -7, 0)
     page:SetScript("OnHide", function() page.resetArmed = nil; page.resetToken = (page.resetToken or 0) + 1; page.reset:GetFontString():SetText("Reset defaults") end)
 end
 
@@ -524,8 +810,9 @@ function ns:OpenCinematicOptions()
     page.reset:GetFontString():SetText("Reset defaults")
     for _, frame in ipairs(panel.mainFrames or {}) do frame:Hide() end
     panel.pick:Hide(); panel.profile:Hide()
-    panel.cinematic:GetFontString():SetText("Rules")
+    panel.cinematic:SetWidth(104); panel.cinematic:GetFontString():SetText("Back to editor")
     page:Show()
+    self:ApplyEditorTheme(true)
     self:RenderCinematicOptions()
 end
 
@@ -536,7 +823,8 @@ function ns:CloseCinematicOptions()
     if self.CinematicOptions then self.CinematicOptions:Hide() end
     for _, frame in ipairs(panel.mainFrames or {}) do frame:Show() end
     panel.pick:Show(); panel.profile:Show()
-    panel.cinematic:GetFontString():SetText("Cinematic")
+    panel.cinematic:SetWidth(88); panel.cinematic:GetFontString():SetText("Cinematic")
+    self:ApplyEditorTheme()
     self:RenderOptions()
 end
 
@@ -544,17 +832,23 @@ function ns:RenderCinematicOptions()
     local page = self.CinematicOptions
     if not page or not page:IsShown() then return end
     local active = self:IsCinematicActive()
+    self:ApplyEditorTheme(true)
+    page.title:SetTextColor(unpack(CINEMATIC_ACCENT))
+    page.advanced:SetBackdropBorderColor(unpack(CINEMATIC_ACCENT)); page.advanced:GetFontString():SetTextColor(unpack(CINEMATIC_ACCENT))
     page.toggle:GetFontString():SetText(active and "Cinematic: On" or "Cinematic: Off")
-    page.toggle._selected, page.toggle._selectedColor = active, C.teal
-    page.toggle:SetBackdropColor(unpack(active and C.teal or C.accent)); page.toggle:GetFontString():SetTextColor(unpack(active and { 0.02, 0.06, 0.07, 1 } or { 1, 1, 1, 1 }))
+    page.toggle._selected, page.toggle._selectedColor = active, CINEMATIC_ACCENT
+    page.toggle:SetBackdropBorderColor(unpack(CINEMATIC_ACCENT))
+    page.toggle:SetBackdropColor(unpack(active and CINEMATIC_ACCENT or C.cardAlt)); page.toggle:GetFontString():SetTextColor(unpack(active and { 0.10, 0.035, 0.01, 1 } or CINEMATIC_ACCENT))
     page.shortcut:GetFontString():SetText("Shortcut: " .. CinematicBindingText())
     if not page.resetArmed then page.reset:GetFontString():SetText("Reset defaults") end
     for index, component in ipairs(ns.CINEMATIC_COMPONENTS) do
         local mode = self:GetCinematicComponentMode(component.id)
         local row = page.rows[index]
         row.mode:GetFontString():SetText(ns.CINEMATIC_MODE_LABELS[mode] or "Custom rules")
-        row.mode._selected, row.mode._selectedColor = mode ~= "untouched", C.teal
-        row.mode:SetBackdropColor(unpack(mode ~= "untouched" and C.cardAlt or { 0.04, 0.045, 0.06, 1 }))
+        row.mode._selected, row.mode._selectedColor = false, nil
+        row.mode:SetBackdropColor(unpack(C.cardAlt))
+        row.mode:SetBackdropBorderColor(unpack(mode ~= "untouched" and C.teal or C.border))
+        row.mode:GetFontString():SetTextColor(unpack(mode ~= "untouched" and C.teal or C.muted))
     end
     if page.blackout and page.blackout.copy then
         local blacked = self.runtime.cinematicBlackoutCount or 0
@@ -649,6 +943,7 @@ function ns:FinishReactionDrag()
     if insertIndex > sourceIndex then insertIndex = insertIndex - 1 end
     insertIndex = math.max(1, math.min(#settings.reactions + 1, insertIndex))
     table.insert(settings.reactions, insertIndex, reaction)
+    self:InvalidateTargetTransition(targetID)
     if self.Options and self.Options:IsVisible() and self.Options.selected == targetID then self:RenderSelectedTarget(targetID) end
 end
 
@@ -752,9 +1047,10 @@ function ns:CreateProfilePicker()
     scroll:SetScript("OnMouseWheel", function(self, delta)
         self:SetVerticalScroll(math.max(0, math.min(self:GetVerticalScrollRange(), self:GetVerticalScroll() - delta * 42)))
     end)
+    SkinScrollFrame(scroll)
     picker.name = CreateFrame("EditBox", nil, picker, "BackdropTemplate")
     picker.name:SetSize(220, 22); picker.name:SetPoint("BOTTOMLEFT", 14, 18); picker.name:SetAutoFocus(false); picker.name:SetFontObject(GameFontHighlightSmall)
-    picker.name:SetTextInsets(8, 8, 0, 0); Backdrop(picker.name, C.cardAlt, C.border); picker.name:SetTextColor(unpack(C.accent))
+    picker.name:SetTextInsets(8, 8, 0, 0); Backdrop(picker.name, C.cardAlt, C.border); picker.name:SetTextColor(unpack(C.accent)); TrackTheme(picker.name, "text")
     picker.create = Button(picker, "Create copy", 106, function()
         local ok, reason = ns:CreateProfile(picker.name:GetText())
         if ok then picker:Hide() else picker.status:SetText(reason); picker.status:SetTextColor(unpack(C.amber)) end
@@ -787,12 +1083,13 @@ function ns:CreateProfileTransfer()
     scroll:SetPoint("TOPLEFT", 14, -62); scroll:SetPoint("BOTTOMRIGHT", -29, 92); transfer.scroll = scroll
     transfer.text = CreateFrame("EditBox", nil, scroll, "BackdropTemplate")
     transfer.text:SetMultiLine(true); transfer.text:SetAutoFocus(false); transfer.text:SetFontObject(ChatFontNormal)
-    transfer.text:SetTextColor(unpack(C.accent)); transfer.text:SetTextInsets(8, 8, 7, 7); transfer.text:SetWidth(410); transfer.text:SetHeight(154); transfer.text:SetMaxLetters(60000)
+    transfer.text:SetTextColor(unpack(C.accent)); TrackTheme(transfer.text, "text"); transfer.text:SetTextInsets(8, 8, 7, 7); transfer.text:SetWidth(410); transfer.text:SetHeight(154); transfer.text:SetMaxLetters(60000)
     Backdrop(transfer.text, C.cardAlt, C.border); scroll:SetScrollChild(transfer.text)
+    SkinScrollFrame(scroll)
     transfer.nameLabel = Text(transfer, "GameFontHighlightSmall", "New profile name", C.teal); transfer.nameLabel:SetPoint("BOTTOMLEFT", 14, 67)
     transfer.name = CreateFrame("EditBox", nil, transfer, "BackdropTemplate")
     transfer.name:SetSize(224, 22); transfer.name:SetPoint("BOTTOMLEFT", 14, 40); transfer.name:SetAutoFocus(false); transfer.name:SetFontObject(GameFontHighlightSmall)
-    transfer.name:SetTextInsets(8, 8, 0, 0); transfer.name:SetTextColor(unpack(C.accent)); Backdrop(transfer.name, C.cardAlt, C.border)
+    transfer.name:SetTextInsets(8, 8, 0, 0); transfer.name:SetTextColor(unpack(C.accent)); TrackTheme(transfer.name, "text"); Backdrop(transfer.name, C.cardAlt, C.border)
     transfer.status = Text(transfer, "GameFontHighlightSmall", "", C.muted); transfer.status:SetPoint("BOTTOMLEFT", 14, 12); transfer.status:SetPoint("RIGHT", -14, 12); transfer.status:SetJustifyH("LEFT")
     transfer.action = Button(transfer, "", 108, nil, true); transfer.action:SetPoint("BOTTOMRIGHT", -14, 40)
     transfer.import = Button(transfer, "Import", 78, nil, true); transfer.import:SetPoint("RIGHT", transfer.action, "LEFT", -7, 0); transfer.import:Hide()
@@ -968,10 +1265,13 @@ function ns:RefreshActiveState()
             local duration = state.reaction.duration or info.duration or 3
             if started then momentDetail = " (" .. Seconds(math.max(0, duration - (GetTime() - started))) .. " left)" end
         end
-        panel.active:SetText("Active now: " .. ConditionLabel(state.reaction.condition) .. (count > 0 and " + " .. count or "") .. momentDetail .. " -> " .. Percent(state.desired))
+        local inherited = state.inheritedFrom and ns.TargetByID[state.inheritedFrom]
+        local prefix = inherited and ("Following " .. inherited.label .. ": ") or "Active now: "
+        panel.active:SetText(prefix .. ConditionLabel(state.reaction.condition) .. (count > 0 and " + " .. count or "") .. momentDetail .. " -> " .. Percent(state.desired))
         panel.active:SetTextColor(unpack(C.teal))
     else
-        panel.active:SetText("Active now: At rest -> " .. Percent(state.desired))
+        local inherited = state.inheritedFrom and ns.TargetByID[state.inheritedFrom]
+        panel.active:SetText((inherited and ("Following " .. inherited.label .. ": At rest") or "Active now: At rest") .. " -> " .. Percent(state.desired))
         panel.active:SetTextColor(unpack(C.muted))
     end
 end
@@ -1022,12 +1322,13 @@ function ns:CreateReactionPalette()
                             table.remove(reaction.requirements, requirementIndex)
                         elseif conditionKey ~= reaction.condition then
                             if reaction.condition == "mouseover" and #reaction.requirements == 0
-                                and ns:HasHoverConnection(targetID) and ns:CountUnconditionalMouseover(settings) <= 1 then
-                                palette.context:SetText("This group or link needs one unconditional Mouseover reaction. Add another Mouseover row first.")
+                                and ns:RequiresUnconditionalMouseover(targetID) and ns:CountUnconditionalMouseover(settings) <= 1 then
+                                palette.context:SetText("This reveal-group member needs one unconditional Mouseover reaction. Add another Mouseover row first.")
                                 return
                             end
                             reaction.requirements[#reaction.requirements + 1] = conditionKey
                         end
+                        ns:InvalidateTargetTransition(targetID)
                         ns:ShowReactionCategory(palette.categoryID)
                     elseif settings then
                         if #settings.reactions >= ns.MAX_REACTIONS_PER_TARGET then
@@ -1038,6 +1339,7 @@ function ns:CreateReactionPalette()
                             id = ns:NextReactionID(), condition = conditionKey, opacity = 1,
                             duration = conditionInfo.duration,
                         }
+                        ns:InvalidateTargetTransition(targetID)
                         palette:Hide(); ns:RenderSelectedTarget(targetID)
                     end
                 end)
@@ -1123,6 +1425,7 @@ function ns:CreateConnectionPicker()
     scroll:SetScript("OnMouseWheel", function(self, delta)
         self:SetVerticalScroll(math.max(0, math.min(self:GetVerticalScrollRange(), self:GetVerticalScroll() - delta * 58)))
     end)
+    SkinScrollFrame(scroll)
     picker.scroll = scroll
     picker.content = CreateFrame("Frame", nil, scroll)
     picker.content:SetSize(382, 1)
@@ -1141,12 +1444,15 @@ function ns:RenderConnectionPicker()
     if not picker or not picker:IsShown() then return end
     local sourceID, mode = picker.sourceID, picker.mode
     if not self.TargetByID[sourceID] then picker:Hide(); return end
-    picker.title:SetText(mode == "group" and "Hover group" or "Linked children")
+    picker.title:SetText(mode == "group" and "Hover group" or mode == "visibility" and "Visibility children" or "Linked children")
     picker.copy:SetText(mode == "group"
         and "Hover any selected frame to reveal the group together."
-        or "Hover the source to reveal every selected child; a child reveals only itself.")
+        or mode == "visibility"
+            and "A child's own matching rules run first; otherwise it follows this frame's resolved opacity."
+            or "Hover the source to reveal every selected child. A child reveals itself only when it has its own Mouseover rule.")
     local group = mode == "group" and select(2, self:GetRevealGroup(sourceID)) or nil
     local children = mode == "link" and self:GetLinkedChildren(sourceID) or nil
+    local visibilityChildren = mode == "visibility" and self:GetVisibilityChildren(sourceID) or nil
     for _, button in pairs(picker.buttons) do button:Hide() end
     local availableTargets = self:GetAvailableTargets()
     for index, target in ipairs(availableTargets) do
@@ -1157,7 +1463,9 @@ function ns:RenderConnectionPicker()
             picker.buttons[targetID] = button
         end
         local isSource = targetID == sourceID
-        local selected = mode == "group" and group and group.members[targetID] or mode == "link" and children[targetID]
+        local selected = mode == "group" and group and group.members[targetID]
+            or mode == "link" and children[targetID]
+            or mode == "visibility" and visibilityChildren[targetID]
         button:Show(); button:ClearAllPoints(); button:SetPoint("TOPLEFT", ((index - 1) % 2) * 193, -math.floor((index - 1) / 2) * 29)
         button._selected = selected and true or false; button._selectedColor = C.teal; button._primary = false
         button:SetBackdropColor(unpack(selected and C.teal or C.cardAlt))
@@ -1173,12 +1481,22 @@ function ns:RenderConnectionPicker()
                     local allowed, reason = ns:AddToRevealGroup(sourceID, targetID)
                     if not allowed then picker.status:SetText(reason); picker.status:SetTextColor(unpack(C.amber)); return end
                 end
-            else
+            elseif mode == "link" then
                 if ns:GetLinkedChildren(sourceID)[targetID] then
                     ns:RemoveLink(sourceID, targetID)
                 else
                     local allowed, reason = ns:AddLink(sourceID, targetID)
                     if not allowed then picker.status:SetText(reason); picker.status:SetTextColor(unpack(C.amber)); return end
+                end
+            else
+                if ns:GetVisibilityChildren(sourceID)[targetID] then
+                    ns:RemoveVisibilityLink(sourceID, targetID)
+                else
+                    local allowed, reason = ns:AddVisibilityLink(sourceID, targetID)
+                    if not allowed then picker.status:SetText(reason); picker.status:SetTextColor(unpack(C.amber)); return end
+                    picker.status:SetText(reason); picker.status:SetTextColor(unpack(C.teal))
+                    ns:RenderConnectionPicker()
+                    return
                 end
             end
             picker.status:SetText("Click frames to add or remove them."); picker.status:SetTextColor(unpack(C.teal))
@@ -1377,13 +1695,56 @@ function ns:RenderTargetRail()
     local panel = self.Options
     if not panel or not panel:IsVisible() then return end
     local query = (panel.targetQuery or ""):match("^%s*(.-)%s*$"):lower()
+    local profileTargets = self:Profile().targets
+    if panel.managedOnlyButton then
+        local enabled = panel.managedOnly == true
+        panel.managedOnlyButton._selected = enabled
+        panel.managedOnlyButton._selectedColor = enabled and { 0.05, 0.18, 0.17, 1 } or nil
+        panel.managedOnlyButton:SetBackdropColor(unpack(enabled and { 0.05, 0.18, 0.17, 1 } or C.cardAlt))
+        panel.managedOnlyButton:SetBackdropBorderColor(unpack(enabled and C.teal or C.border))
+        panel.managedOnlyButton:GetFontString():SetTextColor(unpack(enabled and C.teal or C.accent))
+    end
+    if panel.treeViewButton then
+        panel.treeViewButton:GetFontString():SetText(panel.treeView and "Tree" or "List")
+        panel.treeViewButton._selected = panel.treeView == true
+        panel.treeViewButton._selectedColor = panel.treeView and { 0.08, 0.10, 0.16, 1 } or nil
+        panel.treeViewButton:SetBackdropColor(unpack(panel.treeView and { 0.08, 0.10, 0.16, 1 } or C.cardAlt))
+        panel.treeViewButton:SetBackdropBorderColor(unpack(panel.treeView and C.accent or C.border))
+    end
     ClearChildren(panel.targetContent)
     panel.targetContent._targetRows = panel.targetContent._targetRows or {}
+    local orderedTargets, depthByID = self.Targets, {}
+    if panel.treeView then
+        orderedTargets = {}
+        local targetByID, managed, visited = {}, {}, {}
+        for _, target in ipairs(self.Targets) do
+            targetByID[target.id] = target
+            local settings = profileTargets[target.id]
+            if settings and settings.enabled ~= false then managed[target.id] = true end
+        end
+        local function Append(id, depth)
+            if visited[id] or not managed[id] or not targetByID[id] then return end
+            visited[id], depthByID[id] = true, depth
+            orderedTargets[#orderedTargets + 1] = targetByID[id]
+            for _, candidate in ipairs(self.Targets) do
+                if self:GetVisibilityChildren(id)[candidate.id] then Append(candidate.id, depth + 1) end
+            end
+        end
+        for _, target in ipairs(self.Targets) do
+            if managed[target.id] and not self:GetVisibilityParent(target.id) then Append(target.id, 0) end
+        end
+        for _, target in ipairs(self.Targets) do if managed[target.id] then Append(target.id, 0) end end
+        for _, target in ipairs(self.Targets) do
+            if not managed[target.id] then orderedTargets[#orderedTargets + 1] = target end
+        end
+    end
     local y = 0
     local shown = 0
-    for _, target in ipairs(self.Targets) do
+    for _, target in ipairs(orderedTargets) do
         local searchable = (target.label .. " " .. (target.source or "") .. " " .. target.id):lower()
-        if query == "" or searchable:find(query, 1, true) then
+        local settings = profileTargets[target.id]
+        local managed = settings ~= nil and settings.enabled ~= false
+        if (not panel.managedOnly or managed) and (query == "" or searchable:find(query, 1, true)) then
             shown = shown + 1
             local index = shown
             local targetID = target.id
@@ -1396,16 +1757,57 @@ function ns:RenderTargetRail()
                 row:GetFontString():SetPoint("CENTER", 5, 0)
                 panel.targetContent._targetRows[index] = row
             end
-            row:Show(); row:ClearAllPoints(); row:SetPoint("TOPLEFT", 0, -y); y = y + 27
+            local depth = panel.treeView and (depthByID[target.id] or 0) or 0
+            local indent = math.min(36, depth * 12)
+            row:SetWidth(172 - indent)
+            row:Show(); row:ClearAllPoints(); row:SetPoint("TOPLEFT", indent, -y); y = y + 27
             row._primary = chosen
+            row._targetID, row._managed = targetID, managed
             row:SetBackdropColor(unpack(chosen and C.accent or C.cardAlt))
-            row:GetFontString():SetText(target.label); row:GetFontString():SetTextColor(unpack(chosen and { 1, 1, 1, 1 } or available and C.accent or C.muted))
-            row.dot:SetColorTexture(unpack(available and (ns:GetTargetSettings(target.id) and C.teal or C.accent) or C.amber))
+            row:SetBackdropBorderColor(unpack(C.border))
+            row:GetFontString():SetText((depth > 0 and ">  " or "") .. target.label); row:GetFontString():SetTextColor(unpack(chosen and { 1, 1, 1, 1 } or available and C.accent or C.muted))
+            row.dot:SetColorTexture(unpack(available and (managed and C.teal or C.accent) or C.amber))
             SetTooltip(row, target.label, status .. ": " .. statusNote)
             row:SetScript("OnClick", function()
                 panel.selected = targetID
                 ns:RenderOptions()
             end)
+            row:RegisterForDrag("LeftButton")
+            row:SetScript("OnDragStart", function(self)
+                if not panel.treeView or not self._managed then return end
+                panel.treeDragID, panel.treeDropID = self._targetID, nil
+                self:SetAlpha(0.55)
+                panel.active:SetText("Drop this frame onto its visibility parent")
+                panel.active:SetTextColor(unpack(C.teal))
+            end)
+            row:SetScript("OnDragStop", function(self)
+                local childID, parentID = panel.treeDragID, panel.treeDropID
+                panel.treeDragID, panel.treeDropID = nil, nil
+                self:SetAlpha(available and 1 or 0.78)
+                if childID and parentID and childID ~= parentID then
+                    local ok, reason = ns:AddVisibilityLink(parentID, childID)
+                    ns:RenderOptions()
+                    panel.active:SetText(reason or (ok and "Visibility parent linked" or "Unable to link frames"))
+                    panel.active:SetTextColor(unpack(ok and C.teal or C.amber))
+                    return
+                end
+                ns:RenderOptions()
+            end)
+            if not row._treeHoverHooked then
+                row:HookScript("OnEnter", function(self)
+                    if panel.treeDragID and panel.treeDragID ~= self._targetID and self._managed then
+                        panel.treeDropID = self._targetID
+                        self:SetBackdropBorderColor(unpack(C.teal))
+                    end
+                end)
+                row:HookScript("OnLeave", function(self)
+                    if panel.treeDropID == self._targetID then
+                        panel.treeDropID = nil
+                        self:SetBackdropBorderColor(unpack(C.border))
+                    end
+                end)
+                row._treeHoverHooked = true
+            end
             row:SetAlpha(available and 1 or 0.78)
             panel.targetContent._rows[#panel.targetContent._rows + 1] = row
         end
@@ -1417,6 +1819,7 @@ function ns:RenderTargetRail()
             empty:SetPoint("TOPLEFT", 7, 0); empty:SetWidth(154); empty:SetJustifyH("LEFT"); empty:SetWordWrap(true)
             panel.targetContent.empty = empty
         end
+        empty:SetText(panel.managedOnly and "This profile has no managed frames matching the filter." or "No supported frames match this filter.")
         empty:Show(); panel.targetContent._rows[#panel.targetContent._rows + 1] = empty; y = 38
     end
     panel.targetContent:SetHeight(math.max(1, y))
@@ -1428,12 +1831,17 @@ end
 function ns:RenderOptions()
     local panel = self.Options
     if not panel or not panel:IsVisible() then return end
+    self:ApplyEditorTheme()
     if panel.cinematicView then
         if self.SelectionOutline then self.SelectionOutline:Hide() end
         self:RenderCinematicOptions()
         return
     end
-    if panel.profile then panel.profile:GetFontString():SetText("Profile: " .. ShortText(PriorityFaderDB.profile or "Default", 16)) end
+    if panel.profile then
+        panel.profile:GetFontString():SetText(self:IsCinematicActive() and "Editing: Cinematic" or ("Profile: " .. ShortText(PriorityFaderDB.profile or "Default", 16)))
+        panel.profile:SetBackdropBorderColor(unpack(self:IsCinematicActive() and CINEMATIC_ACCENT or C.border))
+        panel.profile:GetFontString():SetTextColor(unpack(self:IsCinematicActive() and CINEMATIC_ACCENT or C.accent))
+    end
     if not panel.selected or not self.TargetByID[panel.selected] then
         panel.selected = nil
         for _, target in ipairs(self.Targets) do
@@ -1467,6 +1875,20 @@ function ns:RenderSelectedTarget(id)
     local panel = self.Options
     ClearChildren(panel.reactionContent); ClearChildren(panel.presenceContent)
     local target = self.TargetByID[id]
+    local settings = target and self:GetTargetSettings(id) or nil
+    local canForget = target ~= nil and self:CanForgetCustomTarget(id)
+    panel.forgetTarget:SetShown(canForget)
+    if panel.forgetArmed ~= id then
+        panel.forgetArmed = nil
+        panel.forgetTarget:GetFontString():SetText("Remove from list")
+    end
+    local canPaste = target ~= nil and self:CanPasteTargetRules()
+    panel.copyRules:SetEnabled(settings ~= nil); panel.copyRules:SetAlpha(settings and 1 or 0.42)
+    panel.pasteRules:SetEnabled(canPaste); panel.pasteRules:SetAlpha(canPaste and 1 or 0.42)
+    panel.pasteRules._selected, panel.pasteRules._selectedColor = canPaste, canPaste and { 0.05, 0.18, 0.17, 1 } or nil
+    panel.pasteRules:SetBackdropColor(unpack(canPaste and { 0.05, 0.18, 0.17, 1 } or C.cardAlt))
+    panel.pasteRules:SetBackdropBorderColor(unpack(canPaste and C.teal or C.border))
+    panel.pasteRules:GetFontString():SetTextColor(unpack(canPaste and C.teal or C.muted))
     if not target then
         panel.centerTitle:SetText("Pick a frame to begin")
         panel.active:SetText("Your existing UI stays untouched until you choose a target.")
@@ -1491,7 +1913,6 @@ function ns:RenderSelectedTarget(id)
         panel.reactionContent:SetHeight(82)
         return
     end
-    local settings = self:GetTargetSettings(id)
     panel.centerTitle:SetText(target.label .. " reacts")
     if not settings then
         panel.active:SetText("Not controlled yet")
@@ -1538,6 +1959,7 @@ function ns:RenderSelectedTarget(id)
         row.opacity:SetScript("OnClick", function(self, button)
             ns:OpenOpacityPicker(ConditionLabel(reactionData.condition), reactionData.opacity, function(value)
                 reactionData.opacity = value
+                ns:InvalidateTargetTransition(id)
                 row.opacity:GetFontString():SetText(Percent(value))
             end, row.opacity)
         end)
@@ -1555,19 +1977,20 @@ function ns:RenderSelectedTarget(id)
             row.duration:Hide(); row.duration:SetScript("OnClick", nil)
         end
         row.up:SetScript("OnClick", function()
-            if reactionIndex > 1 then settings.reactions[reactionIndex], settings.reactions[reactionIndex - 1] = settings.reactions[reactionIndex - 1], settings.reactions[reactionIndex]; ns:RenderSelectedTarget(id) end
+            if reactionIndex > 1 then settings.reactions[reactionIndex], settings.reactions[reactionIndex - 1] = settings.reactions[reactionIndex - 1], settings.reactions[reactionIndex]; ns:InvalidateTargetTransition(id); ns:RenderSelectedTarget(id) end
         end)
         row.down:SetScript("OnClick", function()
-            if reactionIndex < #settings.reactions then settings.reactions[reactionIndex], settings.reactions[reactionIndex + 1] = settings.reactions[reactionIndex + 1], settings.reactions[reactionIndex]; ns:RenderSelectedTarget(id) end
+            if reactionIndex < #settings.reactions then settings.reactions[reactionIndex], settings.reactions[reactionIndex + 1] = settings.reactions[reactionIndex + 1], settings.reactions[reactionIndex]; ns:InvalidateTargetTransition(id); ns:RenderSelectedTarget(id) end
         end)
         row.remove:SetScript("OnClick", function()
             if reactionData.condition == "mouseover" and #(reactionData.requirements or {}) == 0
-                and ns:HasHoverConnection(id) and ns:CountUnconditionalMouseover(settings) <= 1 then
-                panel.active:SetText("This group or link needs one unconditional Mouseover reaction.")
+                and ns:RequiresUnconditionalMouseover(id) and ns:CountUnconditionalMouseover(settings) <= 1 then
+                panel.active:SetText("This reveal-group member needs one unconditional Mouseover reaction.")
                 panel.active:SetTextColor(unpack(C.amber))
                 return
             end
             table.remove(settings.reactions, reactionIndex)
+            ns:InvalidateTargetTransition(id)
             ns:RenderSelectedTarget(id)
         end)
         panel.reactionContent._rows[#panel.reactionContent._rows + 1] = row; y = y + 45
@@ -1577,15 +2000,21 @@ function ns:RenderSelectedTarget(id)
     local rest = CreateFrame("Frame", nil, panel.reactionContent, "BackdropTemplate")
     rest:SetSize(10, 39); rest:SetPoint("TOPLEFT", 0, -y); rest:SetPoint("TOPRIGHT", 0, -y); Backdrop(rest, { 0.045, 0.05, 0.07, 1 })
     local restLabel = Text(rest, "GameFontHighlight", "Otherwise", C.muted); restLabel:SetPoint("LEFT", 29, 0)
+    local visibilityParent = ns:GetVisibilityParent(id)
+    local visibilityParentTarget = visibilityParent and ns.TargetByID[visibilityParent]
     local restOpacity
-    restOpacity = Button(rest, Percent(settings.atRest), 54, function(self, button)
+    restOpacity = Button(rest, visibilityParent and ("Follow " .. (visibilityParentTarget and visibilityParentTarget.label or visibilityParent)) or Percent(settings.atRest), visibilityParent and 132 or 54, function(self, button)
+        if visibilityParent then return end
         ns:OpenOpacityPicker("Otherwise", settings.atRest, function(value)
             settings.atRest = value
+            ns:InvalidateTargetTransition(id)
             restOpacity:GetFontString():SetText(Percent(value))
         end, restOpacity)
     end)
+    restOpacity:SetEnabled(not visibilityParent)
     restOpacity:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    SetTooltip(restOpacity, "Otherwise opacity", "Choose a preset or drag to a precise visibility level.")
+    SetTooltip(restOpacity, visibilityParent and "Inherited visibility" or "Otherwise opacity",
+        visibilityParent and "No local reaction matched, so this frame uses its visibility parent's resolved opacity." or "Choose a preset or drag to a precise visibility level.")
     restOpacity:SetPoint("RIGHT", -8, 0); panel.reactionContent._rows[#panel.reactionContent._rows + 1] = rest
     y = y + 39
     panel.reactionContent:SetHeight(math.max(1, y))
@@ -1622,7 +2051,11 @@ function ns:RenderSelectedTarget(id)
     group:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -6); p._rows[#p._rows + 1] = group
     local link = Button(p, "+ Linked child", 142, function() ns:OpenConnectionPicker("link", id) end)
     link:SetPoint("TOPLEFT", group, "BOTTOMLEFT", 0, -6); p._rows[#p._rows + 1] = link
-    local previous = link
+    SetTooltip(link, "Linked child", "Hovering this source reveals the child. The child reveals itself only if you keep or add a Mouseover rule on that child.")
+    local visibility = Button(p, "+ Visibility child", 142, function() ns:OpenConnectionPicker("visibility", id) end)
+    visibility:SetPoint("TOPLEFT", link, "BOTTOMLEFT", 0, -6); p._rows[#p._rows + 1] = visibility
+    SetTooltip(visibility, "Visibility child", "The child's own matching rules run first. When none match, it follows this frame's final rule opacity.")
+    local previous = visibility
     local _, revealGroup = ns:GetRevealGroup(id)
     if revealGroup then
         local count = 0; for _ in pairs(revealGroup.members) do count = count + 1 end
@@ -1654,6 +2087,30 @@ function ns:RenderSelectedTarget(id)
             ns:RenderSelectedTarget(id)
         end)
         unlink:SetPoint("TOPLEFT", revealedBy, "BOTTOMLEFT", 0, -4); p._rows[#p._rows + 1] = unlink
+        previous = unlink
+    end
+    local visibilityChildren = ns:GetVisibilityChildren(id)
+    local visibilityCount = 0; for _ in pairs(visibilityChildren) do visibilityCount = visibilityCount + 1 end
+    if visibilityCount > 0 then
+        local follows = Text(p, "GameFontHighlightSmall", "Visibility children: " .. visibilityCount, C.teal)
+        follows:SetPoint("TOPLEFT", previous, "BOTTOMLEFT", 0, -12); p._rows[#p._rows + 1] = follows
+        local clear = Button(p, "Clear", 54, function()
+            local ids = {}; for childID in pairs(ns:GetVisibilityChildren(id)) do ids[#ids + 1] = childID end
+            for _, childID in ipairs(ids) do ns:RemoveVisibilityLink(id, childID) end
+            ns:RenderSelectedTarget(id)
+        end)
+        clear:SetPoint("TOPLEFT", follows, "BOTTOMLEFT", 0, -4); p._rows[#p._rows + 1] = clear; previous = clear
+    end
+    local visibilityParent = ns:GetVisibilityParent(id)
+    if visibilityParent then
+        local parentTarget = ns.TargetByID[visibilityParent]
+        local hasLocalRules = settings and #(settings.reactions or {}) > 0
+        local follows = Text(p, "GameFontHighlightSmall", (hasLocalRules and "Local rules, then: " or "Follows: ") .. (parentTarget and parentTarget.label or visibilityParent), C.teal)
+        follows:SetPoint("TOPLEFT", previous, "BOTTOMLEFT", 0, -12); p._rows[#p._rows + 1] = follows
+        local unlink = Button(p, "Stop following", 92, function()
+            ns:RemoveVisibilityLink(visibilityParent, id); ns:RenderSelectedTarget(id)
+        end)
+        unlink:SetPoint("TOPLEFT", follows, "BOTTOMLEFT", 0, -4); p._rows[#p._rows + 1] = unlink
     end
 end
 

@@ -1,5 +1,74 @@
 # Priority Fader changelog
 
+## 2.5.0 - stable CDM viewers and complete minimap flyout fading
+
+- Replaces the private experimental EUI CDM bridge with first-class Blizzard
+  Cooldowns, Utility, and Buffs viewer targets. EUI continues to own every
+  icon's styling, position, alerts, cooldown state, and bar membership.
+- Custom EUI bars intentionally inherit the PF rule of their underlying viewer
+  category, avoiding dependencies on EUI's daily-changing private internals.
+- Migrates existing picker-created viewer rules to the canonical targets and
+  removes obsolete experimental targets without leaving group or link ghosts.
+- Treats Minimap as a semantic stack: pooled POI regions, Blizzard tracking
+  and indicator branches, UIParent super-tracking, LibDBIcon buttons, and EUI's
+  grouped flyout now follow the one Minimap rule without double-fading normal
+  descendants.
+- Adds built-in logical targets for Details windows. Each one fades the title,
+  controls, background, and separately-parented meter rows together instead of
+  exposing Details' implementation frames as misleading independent choices.
+- Introduces optional semantic providers rather than requiring one personal UI
+  stack. Details targets register only when Details exists; Ellesmere Damage
+  Meter windows register when that module exists; Blizzard's native Damage
+  Meter remains the no-addon fallback. Cinematic quest conversations resolve
+  through DialogueUI or Blizzard, and quick-action palettes through OPie or
+  Ellesmere Quickdraw.
+- Lets discovered and on-screen-picked frames be removed from the catalog with
+  a two-step confirmation, cleaning their rules and relationships in every
+  profile while keeping built-in adapters intact.
+- Makes the Cinematic editing boundary four pixels thick for a clearer mode
+  cue while ordinary controls retain the calmer Resonance palette.
+- Replaces Cinematic's 20 Hz full blackout sweep with immediate frame hooks,
+  reveal-state updates, and a low-rate safety audit. Root discovery is slower
+  and load-on-demand addon scans are debounced, removing the largest sustained
+  FPS cost when hundreds of UI branches are blacked out.
+- Adds visibility inheritance, an optional managed-frame tree, drag-to-link,
+  and per-target Copy/Paste so related frames can share behavior without
+  duplicating every ordered rule manually.
+- Commits brief reveal conditions to their full requested opacity before the
+  configured wait and fade-out. Short movement, casts, mouseovers, and target
+  changes can no longer leave a frame stranded halfway through its transition.
+- Replaces Blizzard's bulky arrow scrollbars throughout the editor with the
+  slim Resonance rail and draggable thumb. Every rail is inset into its card's
+  reserved gutter, so it no longer overlaps or crops across panel borders.
+- Makes Linked child genuinely directional. Hovering the source always reveals
+  the child, while hovering the child reveals itself only when that child has
+  its own Mouseover row. Existing links keep their existing rows and behavior.
+
+## 2.4.2 - quieter Cinematic identity and quick components
+
+- Limits the warm Cinematic accent to scene controls, the live editing cue,
+  and the outer editor border; ordinary controls remain Resonance lavender.
+- Fixes Cinematic quick-mode buttons retaining a teal filled hover state.
+- Adds Cast Bar (Casting only) and Resource Bars (Combat only) to the default
+  Cinematic scene controls and profile template.
+
+## 2.4.1 - managed target filter
+
+- Adds a compact Managed only toggle to the target rail. It shows only frames
+  controlled by the current profile without changing any frame or rule.
+
+## 2.4.0 - Cinematic editing clarity and casting state
+
+- Replaces the ambiguous duplicate Rules actions with a single header-level
+  Back to editor action and a clearly named Fine-tune profile action.
+- Fine-tuning always opens the Cinematic system profile; if the scene is off,
+  Priority Fader turns it on first rather than editing the active normal
+  profile by accident.
+- Introduces a warm Cinematic identity for its dedicated controls and live
+  profile editor. Version 2.4.2 narrows that treatment after visual testing.
+- Adds `Is casting` as a normal state condition for player casts, channels,
+  and empowered casts, including combat-safe event tracking.
+
 ## 2.3.0 - experimental EUI CDM icon bars
 
 - Adds one normal Priority Fader target for every live Ellesmere CDM bar,

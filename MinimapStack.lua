@@ -12,6 +12,7 @@ local appliedAlpha = setmetatable({}, { __mode = "k" })
 local guarded = setmetatable({}, { __mode = "k" })
 local hooked = setmetatable({}, { __mode = "k" })
 local pending = setmetatable({}, { __mode = "k" })
+local hoverExcluded = setmetatable({}, { __mode = "k" })
 local multiplier = 1
 local scan
 
@@ -118,6 +119,21 @@ local function Children(frame)
     return values
 end
 
+local function Regions(frame)
+    if not frame then return {} end
+    local okMethod, callback = pcall(function() return frame.GetRegions end)
+    if not okMethod or type(callback) ~= "function" then return {} end
+    local values = { pcall(callback, frame) }
+    if not table.remove(values, 1) then return {} end
+    return values
+end
+
+local function VisualChildren(frame)
+    local values = Children(frame)
+    for _, region in ipairs(Regions(frame)) do values[#values + 1] = region end
+    return values
+end
+
 local function AddEUIFlyoutPanels(result, minimap)
     -- EUI's grouped addon buttons can live in one anonymous UIParent flyout
     -- rather than beneath Minimap. Claim that small shared panel, not each
@@ -134,12 +150,114 @@ local function AddEUIFlyoutPanels(result, minimap)
     for parent, count in pairs(parents) do
         -- Requiring a shared anonymous direct UIParent parent prevents a stale
         -- cached button from making PF claim an unrelated addon container.
-        if count >= 1 then result[parent] = true end
+        if count >= 1 then
+            result[parent] = true
+            -- The panel itself inherits PF's multiplier, but some third-party
+            -- buttons deliberately ignore parent alpha. Lease only those
+            -- escapees (and nested escapees), avoiding a double multiplier on
+            -- ordinary children that already inherit the panel correctly.
+            local queue, seen, index = VisualChildren(parent), {}, 1
+            while index <= #queue and index <= 256 do
+                local child = queue[index]
+                index = index + 1
+                if child and not seen[child] then
+                    seen[child] = true
+                    if Method(child, "IsIgnoringParentAlpha") == true then result[child] = true end
+                    for _, nested in ipairs(VisualChildren(child)) do
+                        if not seen[nested] then queue[#queue + 1] = nested end
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function HasClaimedAncestor(result, frame)
+    local current, seen, depth = Method(frame, "GetParent"), {}, 0
+    while current and depth < 20 and not seen[current] do
+        if result[current] then return true end
+        seen[current] = true
+        current = Method(current, "GetParent")
+        depth = depth + 1
+    end
+    return false
+end
+
+local function AddSemanticFrame(result, frame, minimap)
+    if not frame or frame == minimap then return end
+    local ignoresParent = Method(frame, "IsIgnoringParentAlpha") == true
+    -- Ordinary Minimap children already inherit its opacity. Only claim the
+    -- unusual children that explicitly opt out of parent alpha.
+    if IsDescendant(frame, minimap) then
+        if ignoresParent then result[frame] = true end
+        return
+    end
+    -- If a semantic container is already leased, its normal descendants must
+    -- not receive the multiplier twice. Descendants that ignore parent alpha
+    -- remain separate leases by design.
+    if HasClaimedAncestor(result, frame) then
+        if ignoresParent then result[frame] = true end
+        return
+    end
+    result[frame] = true
+end
+
+local function AddSemanticMinimapFrames(result, minimap)
+    AddEUIFlyoutPanels(result, minimap)
+
+    -- Retail's visible minimap is not one alpha tree. Mail, tracking and other
+    -- indicators are commonly siblings of Minimap under MinimapCluster.
+    local cluster = _G.MinimapCluster
+    local indicator = cluster and cluster.IndicatorFrame
+    AddSemanticFrame(result, indicator, minimap)
+    AddSemanticFrame(result, cluster and cluster.Tracking, minimap)
+    AddSemanticFrame(result, cluster and cluster.InstanceDifficulty, minimap)
+
+    -- Stable Blizzard minimap surfaces which may move between Minimap,
+    -- MinimapCluster and UIParent across layouts/skins.
+    local known = {
+        _G.AddonCompartmentFrame,
+        _G.ExpansionLandingPageMinimapButton,
+        _G.QueueStatusButton,
+        _G.GameTimeFrame,
+        _G.MiniMapTracking,
+        _G.MiniMapMailFrame,
+    }
+    for _, frame in ipairs(known) do AddSemanticFrame(result, frame, minimap) end
+
+    -- The navigation/super-tracking presentation is a UIParent root rather
+    -- than a Minimap child. It belongs to the same visual stack but must not
+    -- enlarge the minimap's mouseover hit area if Blizzard gives it a broad
+    -- layout rectangle.
+    AddSemanticFrame(result, _G.SuperTrackedFrame, minimap)
+    if _G.SuperTrackedFrame then hoverExcluded[_G.SuperTrackedFrame] = true end
+
+    -- LibDBIcon is the canonical registry for third-party minimap buttons.
+    -- Querying its object table is both cheaper and more accurate than guessing
+    -- ownership from names or screen position after another addon reparents it.
+    local lib
+    if type(_G.LibStub) == "table" or type(_G.LibStub) == "function" then
+        local ok, value = pcall(_G.LibStub, "LibDBIcon-1.0", true)
+        if ok and type(value) == "table" then lib = value end
+    end
+    for _, button in pairs(lib and type(lib.objects) == "table" and lib.objects or {}) do
+        AddSemanticFrame(result, button, minimap)
+    end
+
+    -- EUI publishes the buttons it has collected even while their current
+    -- parent changes between Minimap and its anonymous flyout.
+    for _, button in pairs(type(_G._EBS_CachedAddonButtons) == "table" and _G._EBS_CachedAddonButtons or {}) do
+        AddSemanticFrame(result, button, minimap)
     end
 end
 
 local function BeginScan(minimap)
-    scan = { minimap = minimap, queue = Children(minimap), index = 1, seen = {}, found = {} }
+    -- Minimap POIs are frequently Texture/Region objects rather than child
+    -- Frames. Some deliberately ignore their pin or Minimap parent's alpha.
+    -- Regions still expose GetAlpha/SetAlpha and can safely participate in the
+    -- same composed visibility lease.
+    scan = { minimap = minimap, queue = VisualChildren(minimap), index = 1, seen = {}, found = {} }
+    AddSemanticMinimapFrames(scan.found, minimap)
 end
 
 local function ContinueScan(minimap)
@@ -154,13 +272,13 @@ local function ContinueScan(minimap)
         if child and not scan.seen[child] then
             scan.seen[child] = true
             if Method(child, "IsIgnoringParentAlpha") == true then scan.found[child] = true end
-            for _, nested in ipairs(Children(child)) do
+            for _, nested in ipairs(VisualChildren(child)) do
                 if not scan.seen[nested] then scan.queue[#scan.queue + 1] = nested end
             end
         end
     end
     if scan.index <= #scan.queue then return nil end
-    AddEUIFlyoutPanels(scan.found, minimap)
+    AddSemanticMinimapFrames(scan.found, minimap)
     local result = scan.found
     scan = nil
     return result
@@ -200,9 +318,9 @@ function ns:UpdateMinimapStack(rescan)
         -- The EUI flyout is a tiny, exact adapter and should become a
         -- Cinematic exemption immediately; descendant pin discovery can keep
         -- progressing incrementally without delaying the visible button stack.
-        local flyouts = {}
-        AddEUIFlyoutPanels(flyouts, minimap)
-        for frame in pairs(flyouts) do
+        local semantic = {}
+        AddSemanticMinimapFrames(semantic, minimap)
+        for frame in pairs(semantic) do
             local otherID = self.runtime.managedIDByFrame and self.runtime.managedIDByFrame[frame]
             if not otherID or otherID == "minimap" then Claim(frame) end
         end
@@ -249,7 +367,7 @@ end
 
 function ns:MinimapStackContainsCursor()
     for frame in pairs(owned) do
-        if self:FrameContainsCursor(frame) then return true end
+        if not hoverExcluded[frame] and self:FrameContainsCursor(frame) then return true end
     end
     return false
 end

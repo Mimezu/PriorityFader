@@ -50,20 +50,42 @@ Keep `label` and `source` to at most 64 characters, `capability` concise (48
 characters or fewer), and `capabilityNote` to at most 240 characters so they
 remain readable in the compact editor and bounded in diagnostic output.
 
+## Cinematic scene providers
+
+Optional UI addons can register a semantic visual role without becoming a
+required dependency:
+
+```lua
+PriorityFaderAPI.RegisterSceneProvider({
+  id = "myaddon_palette",
+  role = "quick_actions",
+  cinematicKeep = true,
+  resolve = function()
+    return MyAddonPaletteFrame
+  end,
+})
+```
+
+`resolve()` may return one Frame or a table of Frames. Priority Fader only uses
+these roots as Cinematic visual exemptions; it does not open, close, reparent,
+restyle, or modify the provider's configuration. The built-in providers use
+this same path for DialogueUI/Blizzard quest conversations and Ellesmere
+Quickdraw. OPie's anonymous renderer retains its stricter structural adapter.
+
 ## Ellesmere Cooldown Manager
 
-Priority Fader 2.3 adds an experimental target for each live EUI CDM bar,
-including custom bars. EUI's bar frame supplies the hover area, while Priority
-Fader multiplies the final opacity EUI requests for the Blizzard-owned icons
-assigned to that bar. At 100%, the icons use EUI's exact opacity; at 0%, they
-are visually suppressed. EUI retains styling, placement, cooldown states,
-alerts, and icon membership.
+Priority Fader exposes the three stable Blizzard viewer layers used by the
+Cooldown Manager: Cooldowns, Utility, and Buffs. EllesmereUI may style,
+reposition, and divide their icons into its own bars; PF applies only a final
+alpha to the underlying viewer. EUI therefore retains styling, placement,
+cooldown states, alerts, and icon membership.
 
-Set each managed bar's EUI visibility to **Always Visible**, then configure its
-`CDM icons · ...` target through the normal Priority Fader workflow. The
-integration does not edit EUI source or SavedVariables and requires no EUI
-patch. It is marked experimental because EUI's internal runtime API is not a
-published compatibility contract and may change in a future daily update.
+Set the relevant EUI bars to **Always Visible**, then configure the matching
+`CDM · ...` target through the normal Priority Fader workflow. Custom EUI bars
+inherit the PF rules of their underlying Blizzard category. Two custom bars
+from the same category cannot have separate PF rules, which is the deliberate
+tradeoff for a stable integration that does not inspect EUI runtime tables,
+edit EUI source, or touch its SavedVariables.
 
 ## In-game audit
 

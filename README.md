@@ -5,10 +5,11 @@ Priority Fader is a World of Warcraft addon for approachable, ordered frame-visi
 Highlights include:
 
 - ordered, first-match visibility reactions;
+- composite built-in targets for split UIs such as complete Details windows;
 - mouseover groups and parent/child reveal relationships;
 - visual frame discovery and selection;
 - a configurable Cinematic Mode for an uncluttered questing view;
-- experimental per-bar EllesmereUI Cooldown Manager fading;
+- viewer-level Cooldown Manager fading that composes with EllesmereUI;
 - profiles, import/export, diagnostics, and native keybinding support.
 
 ## Installation

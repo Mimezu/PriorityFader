@@ -48,18 +48,15 @@
 
 ## Ellesmere Cooldown Manager
 
-Version 2.3 includes an experimental PF-only composite adapter. Its visible
-icons are Blizzard-owned frames that EUI repositions rather than children of
-EUI's bar container, so PF uses the container solely as the bar's hover area
-and applies a multiplier to EUI's latest requested opacity for each assigned
-icon. This provides one PF target per built-in or custom EUI bar without
-editing EUI source, SavedVariables, styling, layout, or state rules.
+Version 2.5 uses the stable Blizzard Cooldown Manager viewers as the ownership
+boundary. This keeps Priority Fader above EllesmereUI: EUI continues to style,
+position, group, and animate icons, while PF fades the Cooldowns, Utility, or
+Buffs viewer as a whole.
 
-The adapter remains experimental because these runtime tables are not a
-published EUI compatibility contract. Keep the compatibility boundary small,
-fail closed when the module changes, and revalidate after EUI updates. A future
-official read-only bar/icon registration API would let this graduate from the
-experimental tier without changing its user-facing workflow.
+Custom EUI bars inherit the rule for their underlying viewer category. Per-EUI
+bar independence remains a possible future enhancement only if Ellesmere
+publishes a durable read-only bar membership API; PF will not patch EUI or
+depend on its private daily-changing internals to provide it.
 
 ## Host-visibility adapters (research gate)
 
