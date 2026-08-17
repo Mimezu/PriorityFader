@@ -201,6 +201,42 @@ local function Button(parent, label, width, callback, primary)
     return button
 end
 
+local function CloseButton(parent, callback)
+    local button = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    button:SetSize(24, 24)
+    -- Match Resonance: the close control is a raised corner element, not part
+    -- of the panel border.  The extra level keeps thick Cinematic borders and
+    -- nested header cards from painting over it.
+    button:SetFrameLevel(parent:GetFrameLevel() + 20)
+    Backdrop(button, C.cardAlt, C.border)
+    local strokes = {}
+    for index, angle in ipairs({ math.pi / 4, -math.pi / 4 }) do
+        local stroke = button:CreateTexture(nil, "ARTWORK")
+        stroke:SetTexture("Interface\\Buttons\\WHITE8X8")
+        stroke:SetSize(2, 13)
+        stroke:SetPoint("CENTER")
+        stroke:SetRotation(angle)
+        stroke:SetVertexColor(unpack(C.accent))
+        strokes[index] = stroke
+    end
+    local function Tint(color)
+        for _, stroke in ipairs(strokes) do stroke:SetVertexColor(unpack(color)) end
+    end
+    button:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.05, 0.18, 0.17, 1)
+        self:SetBackdropBorderColor(unpack(C.teal))
+        Tint(C.teal)
+    end)
+    button:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(unpack(C.cardAlt))
+        self:SetBackdropBorderColor(unpack(C.border))
+        Tint(C.accent)
+    end)
+    button:SetScript("OnClick", callback or function() parent:Hide() end)
+    SetTooltip(button, "Close", "Close this window.")
+    return button
+end
+
 function ns:IsCinematicEditorTheme()
     local panel = self.Options
     return panel and (panel.cinematicView == true or self:IsCinematicActive()) or false
@@ -241,7 +277,7 @@ function ns:ApplyEditorTheme(force)
         panel.cinematic:GetFontString():SetTextColor(unpack(CINEMATIC_ACCENT))
     end
     if panel and panel.subtitle then
-        panel.subtitle:SetText(cinematic and "Fine-tuning Cinematic Mode - changes are live." or "Choose visible UI, then decide how present it should feel.")
+        panel.subtitle:SetText(cinematic and "Fine-tuning Cinematic Mode - changes are live." or "Choose visible UI, then decide how it should respond.")
         panel.subtitle:SetTextColor(unpack(cinematic and CINEMATIC_ACCENT or C.muted))
     end
 end
@@ -377,17 +413,19 @@ function ns:CreateOptions()
     header:SetScript("OnDragStop", function() panel:StopMovingOrSizing() end)
     local icon = header:CreateTexture(nil, "ARTWORK")
     icon:SetSize(38, 38); icon:SetPoint("LEFT", 13, 0); icon:SetTexture("Interface\\Icons\\Spell_Mage_ArcaneOrb")
-    local title = Text(header, "GameFontNormalLarge", "Priority Fader", C.accent)
+    local title = Text(header, "GameFontNormalLarge", "Frame Gambit", C.accent)
     title:SetPoint("TOPLEFT", icon, "TOPRIGHT", 10, -11)
-    local subtitle = Text(header, "GameFontHighlightSmall", "Choose visible UI, then decide how present it should feel.", C.muted)
+    local subtitle = Text(header, "GameFontHighlightSmall", "Choose visible UI, then decide how it should respond.", C.muted)
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
     panel.subtitle = subtitle
-    local pick = Button(header, "Choose frame", 98, function() ns:StartPicker() end, true)
-    pick:SetPoint("RIGHT", -43, 0)
+    local version = Text(header, "GameFontHighlightSmall", "v" .. self.VERSION .. "  •  Retail 12.1", C.teal)
+    version:SetPoint("TOPRIGHT", -14, -12)
+    local creator = Text(header, "GameFontHighlightSmall", "by Mimezu", C.muted)
+    creator:SetPoint("TOPRIGHT", version, "BOTTOMRIGHT", 0, -4)
     local profile = Button(header, "Profile: Default", 132, function()
         if ns:IsCinematicActive() then ns:OpenCinematicOptions() else ns:OpenProfilePicker() end
     end)
-    profile:SetPoint("RIGHT", pick, "LEFT", -7, 0); profile:GetFontString():SetWidth(124); profile:GetFontString():SetWordWrap(false); panel.profile = profile
+    profile:SetPoint("RIGHT", header, "RIGHT", -160, 0); profile:GetFontString():SetWidth(124); profile:GetFontString():SetWordWrap(false); panel.profile = profile
     local cinematic = Button(header, "Cinematic", 88, function()
         if panel.cinematicView then ns:CloseCinematicOptions() else ns:OpenCinematicOptions() end
     end)
@@ -397,9 +435,35 @@ function ns:CreateOptions()
     peek:SetPoint("RIGHT", cinematic, "LEFT", -7, 0)
     SetTooltip(peek, "Peek at the game", "Temporarily collapses the editor while keeping the selected frame outlined. Click the small return bar to continue editing.")
     panel.peek = peek
-    panel.pick = pick
-    local close = CreateFrame("Button", nil, panel, "UIPanelCloseButton")
+    local helpButton = Button(header, "Help", 52, function()
+        if ns.OpenHelp then ns:OpenHelp() end
+    end)
+    helpButton:SetPoint("RIGHT", peek, "LEFT", -7, 0)
+    SetTooltip(helpButton, "Help & tutorial", "Learn the Frame Gambit flow, explore key features, or replay the guided tutorial.")
+    panel.helpButton = helpButton
+    subtitle:SetPoint("RIGHT", helpButton, "LEFT", -10, 0)
+    subtitle:SetWordWrap(false)
+    if subtitle.SetMaxLines then subtitle:SetMaxLines(1) end
+    local helpDot = helpButton:CreateTexture(nil, "OVERLAY")
+    helpDot:SetSize(5, 5); helpDot:SetPoint("TOPRIGHT", -3, -3); helpDot:SetColorTexture(unpack(C.teal)); helpDot:Hide()
+    helpButton.tutorialDot = helpDot
+    if self.GetTutorialState then
+        local _, completed = self:GetTutorialState()
+        helpDot:SetShown(not completed)
+    end
+    local close = CloseButton(panel)
     close:SetPoint("TOPRIGHT", -4, -4)
+
+    local resizer = CreateFrame("Button", nil, panel)
+    resizer:SetSize(22, 22); resizer:SetPoint("BOTTOMRIGHT", -3, 3)
+    resizer:SetFrameLevel(panel:GetFrameLevel() + 20)
+    local resizeTexture = resizer:CreateTexture(nil, "ARTWORK")
+    resizeTexture:SetAllPoints(); resizeTexture:SetTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    resizer:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    resizer:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    resizer:SetScript("OnMouseDown", function(_, button) if button == "LeftButton" then panel:StartSizing("BOTTOMRIGHT") end end)
+    resizer:SetScript("OnMouseUp", function() panel:StopMovingOrSizing() end)
+    SetTooltip(resizer, "Resize", "Drag to resize the Frame Gambit editor.")
 
     local targets = CreateFrame("Frame", nil, panel, "BackdropTemplate")
     targets:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -12); targets:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 12, 48); targets:SetWidth(196)
@@ -434,6 +498,7 @@ function ns:CreateOptions()
     panel.treeViewButton = treeView
     local add = Button(targets, "+ Pick on screen", 166, function() ns:StartPicker() end)
     add:SetPoint("TOPLEFT", 12, -36)
+    panel.pickButton = add
     local scan = Button(targets, "Discover visible UI", 166, function()
         if InCombatLockdown() then
             panel.active:SetText("Discover visible UI outside combat."); panel.active:SetTextColor(unpack(C.amber))
@@ -446,6 +511,7 @@ function ns:CreateOptions()
         ns:RenderOptions()
     end)
     scan:SetPoint("TOPLEFT", 12, -63)
+    panel.discoverButton = scan
     local filter = CreateFrame("EditBox", nil, targets, "BackdropTemplate")
     filter:SetSize(166, 22); filter:SetPoint("TOPLEFT", 12, -91); filter:SetAutoFocus(false); filter:SetFontObject(GameFontHighlightSmall)
     filter:SetTextInsets(8, 8, 0, 0); filter:SetTextColor(unpack(C.accent)); TrackTheme(filter, "text"); Backdrop(filter, C.cardAlt, C.border)
@@ -462,7 +528,15 @@ function ns:CreateOptions()
     local targetScroll = CreateFrame("ScrollFrame", nil, targets, "UIPanelScrollFrameTemplate")
     targetScroll:SetPoint("TOPLEFT", 8, -122); targetScroll:SetPoint("BOTTOMRIGHT", -26, 8); panel.targetScroll = targetScroll
     local targetContent = CreateFrame("Frame", nil, targetScroll)
-    targetContent:SetSize(172, 1); targetScroll:SetScrollChild(targetContent)
+    targetContent:SetSize(1, 1); targetScroll:SetScrollChild(targetContent)
+    local function FitTargetContent()
+        -- Cards belong to the viewport, not beneath the separate scrollbar
+        -- gutter. Keeping the scroll child exactly as wide as the viewport
+        -- preserves every right-hand card border at every panel/UI scale.
+        targetContent:SetWidth(math.max(1, targetScroll:GetWidth()))
+    end
+    targetScroll:HookScript("OnSizeChanged", FitTargetContent)
+    C_Timer.After(0, FitTargetContent)
     targetScroll:EnableMouseWheel(true)
     targetScroll:SetScript("OnMouseWheel", function(self, delta)
         self:SetVerticalScroll(math.max(0, math.min(self:GetVerticalScrollRange(), self:GetVerticalScroll() - delta * 45)))
@@ -475,6 +549,17 @@ function ns:CreateOptions()
     Backdrop(center, C.card); panel.center = center; center._rows = {}
     local centerTitle = Text(center, "GameFontNormal", "Choose a target", C.teal); centerTitle:SetPoint("TOPLEFT", 14, -12); panel.centerTitle = centerTitle
     local active = Text(center, "GameFontHighlightSmall", "", C.muted); active:SetPoint("TOPRIGHT", -14, -14); panel.active = active
+    local notice = CreateFrame("Button", nil, center, "BackdropTemplate")
+    notice:SetPoint("TOPLEFT", 14, -37); notice:SetPoint("TOPRIGHT", -29, -37); notice:SetHeight(34)
+    notice:SetFrameLevel(center:GetFrameLevel() + 20); notice:RegisterForClicks("LeftButtonUp")
+    Backdrop(notice, { 0.12, 0.085, 0.035, 0.98 }, C.amber)
+    notice.label = Text(notice, "GameFontHighlightSmall", "", C.amber)
+    notice.label:SetPoint("LEFT", 10, 0); notice.label:SetPoint("RIGHT", -10, 0)
+    notice.label:SetJustifyH("LEFT"); notice.label:SetWordWrap(true)
+    if notice.label.SetMaxLines then notice.label:SetMaxLines(2) end
+    notice:SetScript("OnClick", function(self) self:Hide() end)
+    SetTooltip(notice, "Frame Gambit notice", "Click to dismiss this message.")
+    notice:Hide(); panel.notice = notice
     local reactionScroll = CreateFrame("ScrollFrame", nil, center, "UIPanelScrollFrameTemplate")
     reactionScroll:SetPoint("TOPLEFT", 14, -43); reactionScroll:SetPoint("BOTTOMRIGHT", -29, 44); panel.reactionScroll = reactionScroll
     local reactionContent = CreateFrame("Frame", nil, reactionScroll)
@@ -552,6 +637,7 @@ function ns:CreateOptions()
         panel.forgetArmed = nil
         panel.forgetToken = (panel.forgetToken or 0) + 1
         forget:GetFontString():SetText("Remove from list")
+        if panel.notice then panel.notice:Hide() end
         if ns.ReactionPalette and ns.ReactionPalette:IsShown() then ns.ReactionPalette:Hide() end
         if ns.ConnectionPicker and ns.ConnectionPicker:IsShown() then ns.ConnectionPicker:Hide() end
         if ns.OpacityPicker and ns.OpacityPicker:IsShown() then ns.OpacityPicker:Hide() end
@@ -562,6 +648,8 @@ function ns:CreateOptions()
         if ns.ProfileTransfer and ns.ProfileTransfer:IsShown() then ns.ProfileTransfer:Hide() end
         if ns.CinematicModePicker and ns.CinematicModePicker:IsShown() then ns.CinematicModePicker:Hide() end
         if ns.CinematicKeyCapture and ns.CinematicKeyCapture:IsShown() then ns.CinematicKeyCapture:Hide() end
+        if ns.CloseHelp then ns:CloseHelp() end
+        if ns.CancelTutorial then ns:CancelTutorial("editor_closed") end
         if ns.SelectionOutline and not panel.peeking then ns.SelectionOutline:Hide() end
         ns:StopPreview()
         ns:CancelReactionDrag()
@@ -673,6 +761,33 @@ function ns:CreateCinematicKeyCapture()
     end)
 end
 
+function ns:ShowEditorNotice(message, tone, duration)
+    local panel = self.Options
+    if not panel or not panel.notice or not message or message == "" then return end
+    local color = C[tone] or C.amber
+    panel.noticeToken = (panel.noticeToken or 0) + 1
+    local token = panel.noticeToken
+    panel.notice.label:SetText(tostring(message))
+    panel.notice.label:SetTextColor(unpack(color))
+    panel.notice:SetBackdropBorderColor(unpack(color))
+    panel.notice:Show()
+    if panel.reactionScroll then
+        panel.reactionScroll:ClearAllPoints()
+        panel.reactionScroll:SetPoint("TOPLEFT", 14, -78)
+        panel.reactionScroll:SetPoint("BOTTOMRIGHT", -29, 44)
+    end
+    panel.notice:SetScript("OnHide", function()
+        if panel.reactionScroll then
+            panel.reactionScroll:ClearAllPoints()
+            panel.reactionScroll:SetPoint("TOPLEFT", 14, -43)
+            panel.reactionScroll:SetPoint("BOTTOMRIGHT", -29, 44)
+        end
+    end)
+    C_Timer.After(duration or 8, function()
+        if panel.noticeToken == token and panel.notice then panel.notice:Hide() end
+    end)
+end
+
 function ns:OpenCinematicKeyCapture()
     if InCombatLockdown() then
         if self.CinematicOptions then self.CinematicOptions.status:SetText("Change shortcuts outside combat."); self.CinematicOptions.status:SetTextColor(unpack(C.amber)) end
@@ -698,7 +813,7 @@ function ns:CreateCinematicModePicker()
     table.insert(UISpecialFrames, picker:GetName())
     picker.title = Text(picker, "GameFontNormal", "", C.accent); picker.title:SetPoint("TOPLEFT", 14, -13)
     picker.copy = Text(picker, "GameFontHighlightSmall", "Choose how this component appears in Cinematic Mode.", C.muted); picker.copy:SetPoint("TOPLEFT", picker.title, "BOTTOMLEFT", 0, -4); picker.copy:SetPoint("RIGHT", -14, 0); picker.copy:SetJustifyH("LEFT"); picker.copy:SetWordWrap(true)
-    picker.close = Button(picker, "x", 22, function() picker:Hide() end); picker.close:SetPoint("TOPRIGHT", -9, -9)
+    picker.close = CloseButton(picker); picker.close:SetPoint("TOPRIGHT", -9, -9)
     picker:SetScript("OnHide", function() picker.blocker:Hide(); picker.component = nil end)
 end
 
@@ -762,9 +877,35 @@ function ns:CreateCinematicOptions()
         row.mode = Button(row, "", 126, function() ns:OpenCinematicModePicker(componentData) end); row.mode:SetPoint("RIGHT", -6, 0)
         page.rows[index] = row
     end
-    local kept = CreateFrame("Frame", nil, page, "BackdropTemplate"); kept:SetPoint("TOPLEFT", scene, "TOPRIGHT", 12, 0); kept:SetPoint("TOPRIGHT", -16, -79); kept:SetHeight(122); Backdrop(kept, C.cardAlt, C.border)
-    local keptTitle = Text(kept, "GameFontNormal", "Always left alone", C.teal); keptTitle:SetPoint("TOPLEFT", 12, -11)
-    local keptCopy = Text(kept, "GameFontHighlightSmall", "Enemy nameplates, quick-action palettes (OPie or Quickdraw), loot displays, quest conversations (DialogueUI or Blizzard), tooltips, and essential dialogs stay visible. Priority Fader never reparents or restyles them.", C.muted); keptCopy:SetPoint("TOPLEFT", keptTitle, "BOTTOMLEFT", 0, -5); keptCopy:SetPoint("RIGHT", -12, 0); keptCopy:SetJustifyH("LEFT"); keptCopy:SetWordWrap(true)
+    local kept = CreateFrame("Frame", nil, page, "BackdropTemplate"); kept:SetPoint("TOPLEFT", scene, "TOPRIGHT", 12, 0); kept:SetPoint("TOPRIGHT", -16, -79); kept:SetHeight(150); Backdrop(kept, C.cardAlt, C.border)
+    local keptTitle = Text(kept, "GameFontNormal", "Scene presentation", C.teal); keptTitle:SetPoint("TOPLEFT", 12, -11)
+    local keptCopy = Text(kept, "GameFontHighlightSmall", "Enemy nameplates, quick-action palettes (OPie or Quickdraw), loot displays, quest conversations (DialogueUI or Blizzard), tooltips, and essential dialogs stay visible. Frame Gambit never reparents or restyles them.", C.muted); keptCopy:SetPoint("TOPLEFT", keptTitle, "BOTTOMLEFT", 0, -5); keptCopy:SetPoint("RIGHT", -12, 0); keptCopy:SetJustifyH("LEFT"); keptCopy:SetWordWrap(true)
+    page.letterboxLabel = Text(kept, "GameFontHighlightSmall", "Black bars 10%", C.muted)
+    page.letterboxLabel:SetPoint("BOTTOMLEFT", 12, 17)
+    page.letterboxToggle = Button(kept, "Off", 54, function()
+        local enabled = ns:GetCinematicLetterboxSettings()
+        ns:SetCinematicLetterboxEnabled(not enabled)
+        ns:RenderCinematicOptions()
+    end)
+    page.letterboxToggle:SetPoint("BOTTOMRIGHT", -10, 8)
+    SetTooltip(page.letterboxToggle, "Cinematic black bars", "Add mouse-transparent letterbox bars at the top and bottom of the screen while Cinematic Mode is active.")
+    page.letterboxSlider = CreateFrame("Slider", nil, kept, "BackdropTemplate")
+    page.letterboxSlider:SetPoint("LEFT", page.letterboxLabel, "RIGHT", 10, 0)
+    page.letterboxSlider:SetPoint("RIGHT", page.letterboxToggle, "LEFT", -10, 0)
+    page.letterboxSlider:SetHeight(10)
+    page.letterboxSlider:SetOrientation("HORIZONTAL")
+    page.letterboxSlider:SetMinMaxValues(0.04, 0.25)
+    page.letterboxSlider:SetValueStep(0.01)
+    page.letterboxSlider:SetObeyStepOnDrag(true)
+    Backdrop(page.letterboxSlider, C.card, C.border)
+    local letterboxThumb = page.letterboxSlider:CreateTexture(nil, "OVERLAY")
+    letterboxThumb:SetSize(10, 18); letterboxThumb:SetColorTexture(unpack(CINEMATIC_ACCENT))
+    page.letterboxSlider:SetThumbTexture(letterboxThumb)
+    page.letterboxSlider:SetScript("OnValueChanged", function(_, value)
+        value = math.floor(value * 100 + 0.5) / 100
+        page.letterboxLabel:SetText("Black bars " .. math.floor(value * 100 + 0.5) .. "%")
+        if not page.letterboxApplying then ns:SetCinematicLetterboxHeight(value) end
+    end)
     local future = CreateFrame("Frame", nil, page, "BackdropTemplate"); future:SetPoint("TOPLEFT", kept, "BOTTOMLEFT", 0, -12); future:SetPoint("TOPRIGHT", -16, 0); future:SetHeight(92); Backdrop(future, C.cardAlt, C.border)
     local futureTitle = Text(future, "GameFontNormal", "Other visible UI", C.teal); futureTitle:SetPoint("TOPLEFT", 12, -11)
     future.copy = Text(future, "GameFontHighlightSmall", "Blackout watches eligible UI branches, including addon windows that appear later. Rescan forces an immediate refresh.", C.muted); future.copy:SetPoint("TOPLEFT", futureTitle, "BOTTOMLEFT", 0, -5); future.copy:SetPoint("RIGHT", -12, 0); future.copy:SetJustifyH("LEFT"); future.copy:SetWordWrap(true)
@@ -809,7 +950,7 @@ function ns:OpenCinematicOptions()
     page.resetArmed = nil
     page.reset:GetFontString():SetText("Reset defaults")
     for _, frame in ipairs(panel.mainFrames or {}) do frame:Hide() end
-    panel.pick:Hide(); panel.profile:Hide()
+    panel.profile:Hide()
     panel.cinematic:SetWidth(104); panel.cinematic:GetFontString():SetText("Back to editor")
     page:Show()
     self:ApplyEditorTheme(true)
@@ -822,7 +963,7 @@ function ns:CloseCinematicOptions()
     panel.cinematicView = false
     if self.CinematicOptions then self.CinematicOptions:Hide() end
     for _, frame in ipairs(panel.mainFrames or {}) do frame:Show() end
-    panel.pick:Show(); panel.profile:Show()
+    panel.profile:Show()
     panel.cinematic:SetWidth(88); panel.cinematic:GetFontString():SetText("Cinematic")
     self:ApplyEditorTheme()
     self:RenderOptions()
@@ -840,6 +981,17 @@ function ns:RenderCinematicOptions()
     page.toggle:SetBackdropBorderColor(unpack(CINEMATIC_ACCENT))
     page.toggle:SetBackdropColor(unpack(active and CINEMATIC_ACCENT or C.cardAlt)); page.toggle:GetFontString():SetTextColor(unpack(active and { 0.10, 0.035, 0.01, 1 } or CINEMATIC_ACCENT))
     page.shortcut:GetFontString():SetText("Shortcut: " .. CinematicBindingText())
+    local letterboxEnabled, letterboxHeight = self:GetCinematicLetterboxSettings()
+    page.letterboxApplying = true
+    page.letterboxSlider:SetValue(letterboxHeight)
+    page.letterboxApplying = nil
+    page.letterboxLabel:SetText("Black bars " .. math.floor(letterboxHeight * 100 + 0.5) .. "%")
+    page.letterboxToggle:GetFontString():SetText(letterboxEnabled and "On" or "Off")
+    page.letterboxToggle._selected = letterboxEnabled
+    page.letterboxToggle._selectedColor = letterboxEnabled and CINEMATIC_BUTTON or nil
+    page.letterboxToggle:SetBackdropColor(unpack(letterboxEnabled and CINEMATIC_BUTTON or C.cardAlt))
+    page.letterboxToggle:SetBackdropBorderColor(unpack(letterboxEnabled and CINEMATIC_ACCENT or C.border))
+    page.letterboxToggle:GetFontString():SetTextColor(unpack(letterboxEnabled and CINEMATIC_ACCENT or C.muted))
     if not page.resetArmed then page.reset:GetFontString():SetText("Reset defaults") end
     for index, component in ipairs(ns.CINEMATIC_COMPONENTS) do
         local mode = self:GetCinematicComponentMode(component.id)
@@ -1039,7 +1191,7 @@ function ns:CreateProfilePicker()
     picker.copy = Text(picker, "GameFontHighlightSmall", "Switch instantly, or create a copy of the active setup.", C.muted); picker.copy:SetPoint("TOPLEFT", picker.title, "BOTTOMLEFT", 0, -3)
     picker.export = Button(picker, "Export", 58, function() ns:OpenProfileTransfer("export") end); picker.export:SetPoint("TOPRIGHT", -43, -11)
     picker.import = Button(picker, "Import", 58, function() ns:OpenProfileTransfer("import") end); picker.import:SetPoint("RIGHT", picker.export, "LEFT", -5, 0)
-    local close = Button(picker, "x", 22, function() picker:Hide() end); close:SetPoint("TOPRIGHT", -9, -9)
+    local close = CloseButton(picker); close:SetPoint("TOPRIGHT", -9, -9)
     local scroll = CreateFrame("ScrollFrame", nil, picker, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 14, -61); scroll:SetPoint("BOTTOMRIGHT", -29, 68); picker.scroll = scroll
     local content = CreateFrame("Frame", nil, scroll); content:SetSize(326, 1); scroll:SetScrollChild(content); content._rows = {}; picker.content = content
@@ -1078,7 +1230,7 @@ function ns:CreateProfileTransfer()
     table.insert(UISpecialFrames, transfer:GetName())
     transfer.title = Text(transfer, "GameFontNormal", "", C.accent); transfer.title:SetPoint("TOPLEFT", 14, -13)
     transfer.copy = Text(transfer, "GameFontHighlightSmall", "", C.muted); transfer.copy:SetPoint("TOPLEFT", transfer.title, "BOTTOMLEFT", 0, -3)
-    local close = Button(transfer, "x", 22, function() transfer:Hide() end); close:SetPoint("TOPRIGHT", -9, -9)
+    local close = CloseButton(transfer); close:SetPoint("TOPRIGHT", -9, -9)
     local scroll = CreateFrame("ScrollFrame", nil, transfer, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 14, -62); scroll:SetPoint("BOTTOMRIGHT", -29, 92); transfer.scroll = scroll
     transfer.text = CreateFrame("EditBox", nil, scroll, "BackdropTemplate")
@@ -1287,7 +1439,7 @@ function ns:CreateReactionPalette()
     table.insert(UISpecialFrames, palette:GetName())
     palette.title = Text(palette, "GameFontNormal", "Add a reaction", C.accent); palette.title:SetPoint("TOPLEFT", 14, -13)
     palette.context = Text(palette, "GameFontHighlightSmall", "First matching row wins.", C.muted); palette.context:SetPoint("TOPLEFT", palette.title, "BOTTOMLEFT", 0, -3)
-    local close = Button(palette, "x", 22, function() palette:Hide() end); close:SetPoint("TOPRIGHT", -9, -9)
+    local close = CloseButton(palette); close:SetPoint("TOPRIGHT", -9, -9)
     palette.done = Button(palette, "Done", 66, function() palette:Hide() end, true); palette.done:SetPoint("BOTTOMRIGHT", -12, 11); palette.done:Hide()
     palette:SetScript("OnHide", function()
         palette.blocker:Hide()
@@ -1411,16 +1563,31 @@ function ns:CreateConnectionPicker()
     blocker:SetScript("OnClick", function() end)
     Backdrop(blocker, { 0, 0, 0, 0.42 }, { 0, 0, 0, 0 }); blocker:Hide()
     local picker = CreateFrame("Frame", "PriorityFaderConnections", self.Options, "BackdropTemplate")
-    picker:SetSize(430, 380); picker:SetFrameStrata("FULLSCREEN_DIALOG"); picker:SetFrameLevel(581)
+    picker:SetSize(430, 410); picker:SetFrameStrata("FULLSCREEN_DIALOG"); picker:SetFrameLevel(581)
     picker:EnableMouse(true); Backdrop(picker, C.panel, C.accent); picker:Hide(); picker.blocker = blocker; self.ConnectionPicker = picker
     table.insert(UISpecialFrames, picker:GetName())
     picker.title = Text(picker, "GameFontNormal", "Connections", C.accent); picker.title:SetPoint("TOPLEFT", 14, -13)
     picker.copy = Text(picker, "GameFontHighlightSmall", "", C.muted); picker.copy:SetPoint("TOPLEFT", picker.title, "BOTTOMLEFT", 0, -4); picker.copy:SetPoint("RIGHT", -14, 0); picker.copy:SetJustifyH("LEFT")
     picker.status = Text(picker, "GameFontHighlightSmall", "Click frames to add or remove them.", C.teal); picker.status:SetPoint("TOPLEFT", picker.copy, "BOTTOMLEFT", 0, -6)
     picker.done = Button(picker, "Done", 66, function() picker:Hide() end, true); picker.done:SetPoint("BOTTOMRIGHT", -12, 12)
-    picker.close = Button(picker, "x", 22, function() picker:Hide() end); picker.close:SetPoint("TOPRIGHT", -9, -9)
+    picker.close = CloseButton(picker); picker.close:SetPoint("TOPRIGHT", -9, -9)
+    local search = CreateFrame("EditBox", nil, picker, "BackdropTemplate")
+    search:SetPoint("TOPLEFT", 14, -84); search:SetPoint("TOPRIGHT", -14, -84); search:SetHeight(22)
+    search:SetAutoFocus(false); search:SetFontObject(GameFontHighlightSmall)
+    search:SetTextInsets(8, 8, 0, 0); search:SetTextColor(unpack(C.accent)); TrackTheme(search, "text"); Backdrop(search, C.cardAlt, C.border)
+    local searchHint = Text(search, "GameFontHighlightSmall", "Find a frame...", C.muted)
+    searchHint:SetPoint("LEFT", 8, 0); search.hint = searchHint
+    search:SetScript("OnEditFocusGained", function() searchHint:Hide() end)
+    search:SetScript("OnEditFocusLost", function() if search:GetText() == "" then searchHint:Show() end end)
+    search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    search:SetScript("OnTextChanged", function(self)
+        if self:GetText() == "" and not self:HasFocus() then searchHint:Show() else searchHint:Hide() end
+        picker.query = self:GetText():lower():match("^%s*(.-)%s*$") or ""
+        ns:RenderConnectionPicker()
+    end)
+    picker.search = search
     local scroll = CreateFrame("ScrollFrame", nil, picker, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 14, -86); scroll:SetPoint("BOTTOMRIGHT", -29, 48)
+    scroll:SetPoint("TOPLEFT", 14, -116); scroll:SetPoint("BOTTOMRIGHT", -29, 48)
     scroll:EnableMouseWheel(true)
     scroll:SetScript("OnMouseWheel", function(self, delta)
         self:SetVerticalScroll(math.max(0, math.min(self:GetVerticalScrollRange(), self:GetVerticalScroll() - delta * 58)))
@@ -1431,6 +1598,8 @@ function ns:CreateConnectionPicker()
     picker.content:SetSize(382, 1)
     scroll:SetScrollChild(picker.content)
     picker.buttons = {}
+    picker.empty = Text(picker.content, "GameFontHighlightSmall", "No matching frames.", C.muted)
+    picker.empty:SetPoint("TOP", 0, -10); picker.empty:Hide()
     picker:SetScript("OnHide", function()
         picker.blocker:Hide()
         local sourceID = picker.sourceID
@@ -1455,7 +1624,14 @@ function ns:RenderConnectionPicker()
     local visibilityChildren = mode == "visibility" and self:GetVisibilityChildren(sourceID) or nil
     for _, button in pairs(picker.buttons) do button:Hide() end
     local availableTargets = self:GetAvailableTargets()
-    for index, target in ipairs(availableTargets) do
+    local filteredTargets = {}
+    local query = picker.query or ""
+    for _, target in ipairs(availableTargets) do
+        local searchable = ((target.label or "") .. " " .. (target.source or "") .. " " .. (target.id or "")):lower()
+        if query == "" or searchable:find(query, 1, true) then filteredTargets[#filteredTargets + 1] = target end
+    end
+    picker.empty:SetShown(#filteredTargets == 0)
+    for index, target in ipairs(filteredTargets) do
         local targetID = target.id
         local button = picker.buttons[targetID]
         if not button then
@@ -1503,7 +1679,7 @@ function ns:RenderConnectionPicker()
             ns:RenderConnectionPicker()
         end)
     end
-    picker.content:SetHeight(math.max(1, math.ceil(#availableTargets / 2) * 29))
+    picker.content:SetHeight(math.max(28, math.ceil(#filteredTargets / 2) * 29))
     picker.scroll:SetVerticalScroll(math.min(picker.scroll:GetVerticalScroll(), picker.scroll:GetVerticalScrollRange()))
 end
 
@@ -1512,6 +1688,10 @@ function ns:OpenConnectionPicker(mode, sourceID)
     self:CreateConnectionPicker()
     local picker = self.ConnectionPicker
     picker.mode, picker.sourceID = mode, sourceID
+    picker.query = ""
+    picker.search:SetText("")
+    picker.search:ClearFocus()
+    picker.search.hint:Show()
     picker.scroll:SetVerticalScroll(0)
     picker:ClearAllPoints(); picker:SetPoint("CENTER", self.Options, "CENTER", 0, 0)
     picker.blocker:Show(); picker:Show(); self:RenderConnectionPicker()
@@ -1529,7 +1709,7 @@ function ns:CreateOpacityPicker()
     table.insert(UISpecialFrames, picker:GetName())
     picker.title = Text(picker, "GameFontNormal", "Opacity", C.accent); picker.title:SetPoint("TOPLEFT", 14, -13)
     picker.value = Text(picker, "GameFontNormal", "", C.teal); picker.value:SetPoint("TOPRIGHT", -42, -13)
-    local close = Button(picker, "x", 22, function() picker:Hide() end); close:SetPoint("TOPRIGHT", -9, -9)
+    local close = CloseButton(picker); close:SetPoint("TOPRIGHT", -9, -9)
     picker.slider = CreateFrame("Slider", nil, picker, "BackdropTemplate")
     picker.slider:SetPoint("TOPLEFT", 16, -46); picker.slider:SetPoint("TOPRIGHT", -16, -46); picker.slider:SetHeight(14)
     picker.slider:SetOrientation("HORIZONTAL")
@@ -1586,7 +1766,7 @@ function ns:CreateDurationPicker()
     table.insert(UISpecialFrames, picker:GetName())
     picker.title = Text(picker, "GameFontNormal", "Reaction duration", C.accent); picker.title:SetPoint("TOPLEFT", 14, -13)
     picker.value = Text(picker, "GameFontNormal", "", C.teal); picker.value:SetPoint("TOPRIGHT", -42, -13)
-    local close = Button(picker, "x", 22, function() picker:Hide() end); close:SetPoint("TOPRIGHT", -9, -9)
+    local close = CloseButton(picker); close:SetPoint("TOPRIGHT", -9, -9)
     picker.slider = CreateFrame("Slider", nil, picker, "BackdropTemplate")
     picker.slider:SetPoint("TOPLEFT", 16, -46); picker.slider:SetPoint("TOPRIGHT", -16, -46); picker.slider:SetHeight(14)
     picker.slider:SetOrientation("HORIZONTAL")
@@ -1642,8 +1822,8 @@ function ns:CreateTimingPicker()
     Backdrop(picker, C.panel, C.accent); picker:Hide(); picker.blocker = blocker; self.TimingPicker = picker
     table.insert(UISpecialFrames, picker:GetName())
     picker.title = Text(picker, "GameFontNormal", "Frame timing", C.accent); picker.title:SetPoint("TOPLEFT", 14, -13)
-    picker.help = Text(picker, "GameFontHighlightSmall", "Applies to this target only.", C.muted); picker.help:SetPoint("TOPLEFT", picker.title, "BOTTOMLEFT", 0, -3)
-    local close = Button(picker, "x", 22, function() picker:Hide() end); close:SetPoint("TOPRIGHT", -9, -9)
+    picker.help = Text(picker, "GameFontHighlightSmall", "Applies to this target only.", C.muted); picker.help:SetPoint("TOPLEFT", picker.title, "BOTTOMLEFT", 0, -3); picker.help:SetWidth(276); picker.help:SetWordWrap(false)
+    local close = CloseButton(picker); close:SetPoint("TOPRIGHT", -9, -9)
     picker.fadeLabel = Text(picker, "GameFontHighlightSmall", "Transition time", C.teal); picker.fadeLabel:SetPoint("TOPLEFT", 16, -58)
     picker.fadeValue = Text(picker, "GameFontHighlightSmall", "", C.teal); picker.fadeValue:SetPoint("TOPRIGHT", -18, -58)
     picker.fade = CreateFrame("Slider", nil, picker, "BackdropTemplate")
@@ -1656,25 +1836,28 @@ function ns:CreateTimingPicker()
     picker.delay = CreateFrame("Slider", nil, picker, "BackdropTemplate")
     picker.delay:SetPoint("TOPLEFT", 16, -138); picker.delay:SetPoint("TOPRIGHT", -16, -138); picker.delay:SetHeight(14)
     picker.delay:SetOrientation("HORIZONTAL")
-    picker.delay:SetMinMaxValues(0, 5); picker.delay:SetValueStep(0.05); picker.delay:SetObeyStepOnDrag(true); Backdrop(picker.delay, C.cardAlt, C.border)
+    picker.delay:SetMinMaxValues(0, 15); picker.delay:SetValueStep(0.05); picker.delay:SetObeyStepOnDrag(true); Backdrop(picker.delay, C.cardAlt, C.border)
     local delayThumb = picker.delay:CreateTexture(nil, "OVERLAY"); delayThumb:SetSize(12, 20); delayThumb:SetColorTexture(unpack(C.teal)); picker.delay:SetThumbTexture(delayThumb)
     picker.done = Button(picker, "Done", 66, function() picker:Hide() end, true); picker.done:SetPoint("BOTTOMRIGHT", -12, 12)
     function picker:UpdateVisuals()
-        self.fadeValue:SetText(string.format("%.2fs", self.fade:GetValue()))
+        self.fadeValue:SetText(self.hostTiming and "automatic" or string.format("%.2fs", self.fade:GetValue()))
         self.delayValue:SetText(string.format("%.2fs", self.delay:GetValue()))
     end
     local function ApplyTiming()
         if picker.loading then return end
         local settings = picker.targetID and ns:GetTargetSettings(picker.targetID)
         if not settings then return end
-        settings.fadeDuration = math.floor(picker.fade:GetValue() * 100 + 0.5) / 100
+        if not picker.hostTiming then
+            settings.fadeDuration = math.floor(picker.fade:GetValue() * 100 + 0.5) / 100
+        end
         settings.fadeDelay = math.floor(picker.delay:GetValue() * 100 + 0.5) / 100
+        ns:InvalidateTargetTransition(picker.targetID)
         picker:UpdateVisuals()
     end
     picker.fade:SetScript("OnValueChanged", ApplyTiming); picker.delay:SetScript("OnValueChanged", ApplyTiming)
     picker:SetScript("OnHide", function()
         local targetID = picker.targetID
-        picker.blocker:Hide(); picker.targetID = nil
+        picker.blocker:Hide(); picker.targetID = nil; picker.hostTiming = nil
         if targetID and ns.Options and ns.Options:IsVisible() and ns.Options.selected == targetID then
             ns:RenderSelectedTarget(targetID)
         end
@@ -1684,7 +1867,15 @@ end
 function ns:OpenTimingPicker(id, settings)
     self:CreateTimingPicker()
     local picker = self.TimingPicker
+    local target = self.TargetByID[id]
     picker.targetID, picker.loading = id, true
+    picker.hostTiming = target and target.timingOwner == "host" or false
+    picker.help:SetText(picker.hostTiming
+        and (target.timingNote or "This UI owns its physical transition. Frame Gambit controls only the fade-out wait.")
+        or "Applies to this target only.")
+    picker.fadeLabel:SetText(picker.hostTiming and (target.timingLabel or "Host transition") or "Transition time")
+    picker.fade:SetEnabled(not picker.hostTiming)
+    picker.fade:SetAlpha(picker.hostTiming and 0.35 or 1)
     picker.fade:SetValue(settings.fadeDuration); picker.delay:SetValue(settings.fadeDelay)
     picker.loading = nil; picker:UpdateVisuals()
     picker:ClearAllPoints(); picker:SetPoint("CENTER", self.Options, "CENTER", 0, 0)
@@ -1712,6 +1903,7 @@ function ns:RenderTargetRail()
         panel.treeViewButton:SetBackdropBorderColor(unpack(panel.treeView and C.accent or C.border))
     end
     ClearChildren(panel.targetContent)
+    panel.tutorialSelectedRow = nil
     panel.targetContent._targetRows = panel.targetContent._targetRows or {}
     local orderedTargets, depthByID = self.Targets, {}
     if panel.treeView then
@@ -1754,14 +1946,22 @@ function ns:RenderTargetRail()
             if not row then
                 row = Button(panel.targetContent, "", 172, nil)
                 row.dot = row:CreateTexture(nil, "OVERLAY"); row.dot:SetSize(5, 5); row.dot:SetPoint("LEFT", 7, 0)
-                row:GetFontString():SetPoint("CENTER", 5, 0)
+                local label = row:GetFontString()
+                label:ClearAllPoints()
+                -- Leave a deliberate second-square-sized breath after the status dot.
+                label:SetPoint("LEFT", row, "LEFT", 22, 0)
+                label:SetPoint("RIGHT", row, "RIGHT", -7, 0)
+                label:SetJustifyH("LEFT")
+                label:SetWordWrap(false)
+                if label.SetMaxLines then label:SetMaxLines(1) end
                 panel.targetContent._targetRows[index] = row
             end
             local depth = panel.treeView and (depthByID[target.id] or 0) or 0
             local indent = math.min(36, depth * 12)
-            row:SetWidth(172 - indent)
+            row:SetWidth(math.max(1, panel.targetScroll:GetWidth() - indent))
             row:Show(); row:ClearAllPoints(); row:SetPoint("TOPLEFT", indent, -y); y = y + 27
             row._primary = chosen
+            if chosen then panel.tutorialSelectedRow = row end
             row._targetID, row._managed = targetID, managed
             row:SetBackdropColor(unpack(chosen and C.accent or C.cardAlt))
             row:SetBackdropBorderColor(unpack(C.border))
@@ -1874,6 +2074,7 @@ end
 function ns:RenderSelectedTarget(id)
     local panel = self.Options
     ClearChildren(panel.reactionContent); ClearChildren(panel.presenceContent)
+    panel.addReactionButton, panel.otherwiseRow, panel.outlineButton = nil, nil, nil
     local target = self.TargetByID[id]
     local settings = target and self:GetTargetSettings(id) or nil
     local canForget = target ~= nil and self:CanForgetCustomTarget(id)
@@ -1923,7 +2124,7 @@ function ns:RenderSelectedTarget(id)
         end, true)
         use:SetPoint("TOPLEFT", 0, 0)
         panel.reactionContent._rows[#panel.reactionContent._rows + 1] = use
-        local help = Text(panel.reactionContent, "GameFontHighlightSmall", "Priority Fader starts with Mouseover and In combat at 100%, then fades to 12% at rest.", C.muted)
+        local help = Text(panel.reactionContent, "GameFontHighlightSmall", "Frame Gambit starts with Mouseover and In combat at 100%, then fades to 12% at rest.", C.muted)
         help:SetPoint("TOPLEFT", use, "BOTTOMLEFT", 0, -10)
         help:SetPoint("RIGHT", -10, 0)
         help:SetJustifyH("LEFT"); help:SetWordWrap(true)
@@ -1985,8 +2186,7 @@ function ns:RenderSelectedTarget(id)
         row.remove:SetScript("OnClick", function()
             if reactionData.condition == "mouseover" and #(reactionData.requirements or {}) == 0
                 and ns:RequiresUnconditionalMouseover(id) and ns:CountUnconditionalMouseover(settings) <= 1 then
-                panel.active:SetText("This reveal-group member needs one unconditional Mouseover reaction.")
-                panel.active:SetTextColor(unpack(C.amber))
+                ns:ShowEditorNotice("This relationship needs one unconditional Mouseover reaction. Add another Mouseover row before removing this one.", "amber")
                 return
             end
             table.remove(settings.reactions, reactionIndex)
@@ -1997,8 +2197,10 @@ function ns:RenderSelectedTarget(id)
     end
     local add = Button(panel.reactionContent, "+ Add reaction", 130, function() ns:OpenReactionPalette(id) end, true)
     add:SetPoint("TOPLEFT", 0, -y); panel.reactionContent._rows[#panel.reactionContent._rows + 1] = add; y = y + 38
+    panel.addReactionButton = add
     local rest = CreateFrame("Frame", nil, panel.reactionContent, "BackdropTemplate")
     rest:SetSize(10, 39); rest:SetPoint("TOPLEFT", 0, -y); rest:SetPoint("TOPRIGHT", 0, -y); Backdrop(rest, { 0.045, 0.05, 0.07, 1 })
+    panel.otherwiseRow = rest
     local restLabel = Text(rest, "GameFontHighlight", "Otherwise", C.muted); restLabel:SetPoint("LEFT", 29, 0)
     local visibilityParent = ns:GetVisibilityParent(id)
     local visibilityParentTarget = visibilityParent and ns.TargetByID[visibilityParent]
@@ -2031,7 +2233,12 @@ function ns:RenderSelectedTarget(id)
     local timing = Button(p, string.format("Fade %.2fs / wait %.2fs", settings.fadeDuration, settings.fadeDelay), 142, function()
         ns:OpenTimingPicker(id, settings)
     end)
-    SetTooltip(timing, "Frame timing", "Set transition time and how long Priority Fader waits before fading down.")
+    if target.timingOwner == "host" then
+        timing:GetFontString():SetText(string.format("%s / wait %.2fs", target.timingLabel or "Host fade", settings.fadeDelay))
+        SetTooltip(timing, target.timingLabel or "Host-owned timing", target.timingNote or "This UI owns its physical transition. Frame Gambit controls the delay before requesting a fade-out.")
+    else
+        SetTooltip(timing, "Frame timing", "Set transition time and how long Frame Gambit waits before fading down.")
+    end
     timing:SetPoint("TOPLEFT", explain, "BOTTOMLEFT", 0, -15); p._rows[#p._rows + 1] = timing
     local preview
     preview = Button(p, panel.selectionOutlineEnabled == false and "Frame outline: Off" or "Frame outline: On", 142, function()
@@ -2047,8 +2254,44 @@ function ns:RenderSelectedTarget(id)
     preview:GetFontString():SetTextColor(unpack(preview._selected and { 0.02, 0.06, 0.07, 1 } or C.accent))
     SetTooltip(preview, "Frame outline", "Keeps a live boundary around the frame you are editing. It never changes frame opacity or mouse behavior.")
     preview:SetPoint("TOPLEFT", timing, "BOTTOMLEFT", 0, -6); p._rows[#p._rows + 1] = preview
+    panel.outlineButton = preview
+    local relationshipAnchor = preview
+    if id == "minimap" then
+        local order = ns.MINIMAP_NATIVE_MARKER_ORDER or { "keep", "hide_zero", "scale" }
+        local labels = ns.MINIMAP_NATIVE_MARKER_MODES or {}
+        local mode = labels[settings.nativeMarkerMode] and settings.nativeMarkerMode or "keep"
+        settings.nativeMarkerMode = mode
+        local markerAvailable, markerReason = true, nil
+        if ns.GetMinimapNativeMarkerAvailability then
+            markerAvailable, markerReason = ns:GetMinimapNativeMarkerAvailability()
+        end
+        local markers
+        markers = Button(p, markerAvailable and ("Markers: " .. (labels[mode] or mode)) or "Markers: unavailable", 142, function()
+            local available, reason = true, nil
+            if ns.GetMinimapNativeMarkerAvailability then
+                available, reason = ns:GetMinimapNativeMarkerAvailability()
+            end
+            if available == false then
+                ns:ShowEditorNotice(reason or "Native marker scale is unavailable on this client.", "amber")
+                return
+            end
+            local current = settings.nativeMarkerMode or "keep"
+            local index = 1
+            for i, value in ipairs(order) do if value == current then index = i; break end end
+            settings.nativeMarkerMode = order[index % #order + 1]
+            markers:GetFontString():SetText("Markers: " .. (labels[settings.nativeMarkerMode] or settings.nativeMarkerMode))
+            markers:SetBackdropBorderColor(unpack(settings.nativeMarkerMode == "keep" and C.border or C.amber))
+            if ns.UpdateMinimapStack then ns:UpdateMinimapStack(true) end
+        end)
+        markers:SetBackdropBorderColor(unpack(markerAvailable and mode == "keep" and C.border or C.amber))
+        SetTooltip(markers, "Experimental native markers",
+            markerAvailable and "Cycles how Frame Gambit treats Blizzard's engine-drawn service and quest markers. Leave unchanged is safest. Hide at 0% snaps them off only when the map is fully faded. Scale with map shrinks them continuously. Releasing the Minimap restores the captured host marker scale; tracking categories are never changed."
+                or (markerReason or "This client does not expose a restoration-safe native marker scale."))
+        markers:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -6); p._rows[#p._rows + 1] = markers
+        relationshipAnchor = markers
+    end
     local group = Button(p, "+ Hover group", 142, function() ns:OpenConnectionPicker("group", id) end)
-    group:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -6); p._rows[#p._rows + 1] = group
+    group:SetPoint("TOPLEFT", relationshipAnchor, "BOTTOMLEFT", 0, -6); p._rows[#p._rows + 1] = group
     local link = Button(p, "+ Linked child", 142, function() ns:OpenConnectionPicker("link", id) end)
     link:SetPoint("TOPLEFT", group, "BOTTOMLEFT", 0, -6); p._rows[#p._rows + 1] = link
     SetTooltip(link, "Linked child", "Hovering this source reveals the child. The child reveals itself only if you keep or add a Mouseover rule on that child.")

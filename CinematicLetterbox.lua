@@ -1,0 +1,95 @@
+local ADDON, ns = ...
+
+-- Frame Gambit's letterbox is a presentation overlay only. It never parents,
+-- hides, or otherwise mutates Blizzard or third-party frames.
+
+local DEFAULT_HEIGHT = 0.10
+local MIN_HEIGHT = 0.04
+local MAX_HEIGHT = 0.25
+
+local function NormalizeHeight(value)
+    value = tonumber(value) or DEFAULT_HEIGHT
+    value = math.max(MIN_HEIGHT, math.min(MAX_HEIGHT, value))
+    return math.floor(value * 100 + 0.5) / 100
+end
+
+function ns:GetCinematicLetterboxSettings()
+    local db = PriorityFaderDB
+    if type(db) ~= "table" then return false, DEFAULT_HEIGHT end
+    db.cinematic = type(db.cinematic) == "table" and db.cinematic or {}
+    local cinematic = db.cinematic
+    cinematic.letterboxEnabled = cinematic.letterboxEnabled == true
+    cinematic.letterboxHeight = NormalizeHeight(cinematic.letterboxHeight)
+    return cinematic.letterboxEnabled, cinematic.letterboxHeight
+end
+
+function ns:CreateCinematicLetterbox()
+    if self.CinematicLetterboxTop and self.CinematicLetterboxBottom then return end
+    local function Bar(name, point)
+        local frame = CreateFrame("Frame", name, UIParent)
+        frame:SetPoint(point == "TOP" and "TOPLEFT" or "BOTTOMLEFT", UIParent,
+            point == "TOP" and "TOPLEFT" or "BOTTOMLEFT", 0, 0)
+        frame:SetPoint(point == "TOP" and "TOPRIGHT" or "BOTTOMRIGHT", UIParent,
+            point == "TOP" and "TOPRIGHT" or "BOTTOMRIGHT", 0, 0)
+        frame:SetFrameStrata("FULLSCREEN")
+        frame:SetFrameLevel(1)
+        frame:EnableMouse(false)
+        local black = frame:CreateTexture(nil, "BACKGROUND")
+        black:SetAllPoints()
+        black:SetColorTexture(0, 0, 0, 1)
+        frame:Hide()
+        return frame
+    end
+    self.CinematicLetterboxTop = Bar("PriorityFaderCinematicLetterboxTop", "TOP")
+    self.CinematicLetterboxBottom = Bar("PriorityFaderCinematicLetterboxBottom", "BOTTOM")
+end
+
+function ns:IsCinematicLetterboxFrame(frame)
+    return frame ~= nil and (frame == self.CinematicLetterboxTop or frame == self.CinematicLetterboxBottom)
+end
+
+function ns:RefreshCinematicLetterbox()
+    self:CreateCinematicLetterbox()
+    local enabled, height = self:GetCinematicLetterboxSettings()
+    local active = self.IsCinematicActive and self:IsCinematicActive()
+    local parentHeight = UIParent and UIParent:GetHeight() or 0
+    if type(parentHeight) ~= "number" or parentHeight <= 0 then parentHeight = 1080 end
+    local pixels = math.max(1, math.floor(parentHeight * height + 0.5))
+    self.CinematicLetterboxTop:SetHeight(pixels)
+    self.CinematicLetterboxBottom:SetHeight(pixels)
+    if active and enabled then
+        self.CinematicLetterboxTop:Show()
+        self.CinematicLetterboxBottom:Show()
+    else
+        self.CinematicLetterboxTop:Hide()
+        self.CinematicLetterboxBottom:Hide()
+    end
+end
+
+function ns:SetCinematicLetterboxEnabled(enabled)
+    local db = PriorityFaderDB
+    if type(db) ~= "table" then return false end
+    db.cinematic = type(db.cinematic) == "table" and db.cinematic or {}
+    db.cinematic.letterboxEnabled = enabled == true
+    self:RefreshCinematicLetterbox()
+    return true
+end
+
+function ns:SetCinematicLetterboxHeight(height)
+    local db = PriorityFaderDB
+    if type(db) ~= "table" then return false end
+    db.cinematic = type(db.cinematic) == "table" and db.cinematic or {}
+    db.cinematic.letterboxHeight = NormalizeHeight(height)
+    self:RefreshCinematicLetterbox()
+    return true
+end
+
+local watcher = CreateFrame("Frame")
+watcher:RegisterEvent("DISPLAY_SIZE_CHANGED")
+watcher:RegisterEvent("UI_SCALE_CHANGED")
+watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+watcher:SetScript("OnEvent", function()
+    C_Timer.After(0, function()
+        if ns.RefreshCinematicLetterbox then ns:RefreshCinematicLetterbox() end
+    end)
+end)

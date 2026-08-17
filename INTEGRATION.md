@@ -1,6 +1,6 @@
-# Priority Fader integration API
+# Frame Gambit integration API
 
-Priority Fader is a companion layer: it owns only its own opacity rules and
+Frame Gambit (internally still `PriorityFader` for compatibility) is a companion layer: it owns only its own opacity rules and
 saved variables.  An external UI can opt in by registering a stable adapter;
 it must not expose its configuration database.
 
@@ -13,6 +13,12 @@ local ok, reason = PriorityFaderAPI.RegisterTarget({
   capability = "Live fade in combat",
   capabilityTone = "teal", -- teal, accent, amber, or muted
   capabilityNote = "Priority Fader fades this bar but never changes its secure buttons.",
+  -- Optional: the host accepts a target alpha but owns its physical animation.
+  -- Frame Gambit will keep rule priority and fade-out delay, without applying
+  -- a competing transition or presenting a misleading duration control.
+  timingOwner = "host",
+  timingLabel = "My UI timing",
+  timingNote = "My UI owns the physical fade animation.",
   resolve = function()
     return MyUI_MainBar
   end,
@@ -45,6 +51,12 @@ methods, mouse behavior, layout, or styling.
 the target editor and picker. `capabilityNote` is the bounded explanatory copy
 shown in the editor. They describe the adapter's limits; they do not grant
 Priority Fader any extra control over the frame.
+
+`timingOwner = "host"` is an optional adapter contract for semantic surfaces
+whose supported API accepts a final opacity but deliberately owns its own
+animation. `timingLabel` and `timingNote` explain that boundary in the editor.
+Frame Gambit still evaluates ordered conditions and its fade-out wait, then
+requests the resolved opacity once instead of running a second interpolation.
 
 Keep `label` and `source` to at most 64 characters, `capability` concise (48
 characters or fewer), and `capabilityNote` to at most 240 characters so they

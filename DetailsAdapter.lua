@@ -220,9 +220,9 @@ local function MakeProxy(index)
     end
     function proxy:SetAlpha(value)
         if type(value) ~= "number" or Secret(value) or value ~= value or value < 0 or value > 1 then return end
-        if not Refresh(state) then error("Priority Fader could not resolve this Details window.", 0) end
+        if not Refresh(state) then error("Frame Gambit could not resolve this Details window.", 0) end
         for _, frame in ipairs(state.members) do
-            if not SetAlpha(frame, value) then error("Priority Fader could not fade this Details window.", 0) end
+            if not SetAlpha(frame, value) then error("Frame Gambit could not fade this Details window.", 0) end
         end
         state.applied = value
         for _, frame in ipairs(state.members) do

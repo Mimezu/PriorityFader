@@ -1,4 +1,62 @@
-# Priority Fader changelog
+# Frame Gambit changelog
+
+## Unreleased
+
+- Added a compact Help Center with focused guides for Gambits, relationships,
+  Cinematic Mode, safety, and troubleshooting.
+- Added a reusable, non-destructive guided tutorial for the complete
+  Manage → React → Order → Otherwise → Preview flow, followed by a clear handoff
+  to the real on-screen picker.
+- Added an interactive priority board that demonstrates why the first
+  matching line wins without changing a real profile.
+- Added safe tutorial persistence, combat pause/resume, contextual highlights,
+  and a Help notification until the tour is completed.
+- Added optional mouse-transparent Cinematic letterbox bars. Their shared
+  height is adjustable from 4% to 25% of the screen and adapts to resolution
+  or UI-scale changes without modifying any Blizzard or addon frame.
+- Added an experimental Minimap native-marker control with `Leave unchanged`,
+  `Hide at 0%`, and `Scale with map` modes. It uses the Minimap compositor's
+  icon-scale surface and never edits Blizzard tracking categories. Frame
+  Gambit now recomposes later Blizzard scale requests and periodically
+  reasserts the result after native marker-layer rebuilds.
+- Native minimap marker composition now captures and restores the host's real
+  icon scale instead of assuming 100%, accepts host scales above 1, and keeps
+  failed restorations pending until they can complete safely.
+- On clients where native marker scale is write-only, those experimental modes
+  now show as unavailable instead of silently guessing 100% or appearing active
+  while doing nothing. They become available if the owning UI announces a
+  trustworthy scale later.
+- Minimap native-marker mode now survives profile export/import through a
+  backward-compatible optional record; older profile strings still import.
+- The existing Chat target now becomes a complete Ellesmere Chat visibility
+  proxy when that module is installed, covering its UIParent-level messages,
+  panel, tabs, sidebar and chrome while returning native ownership to EUI when
+  the target is released. Blizzard Chat remains the automatic fallback.
+- Ellesmere Chat now explicitly uses host-owned physical timing: Frame Gambit
+  controls ordered rules and fade-out wait, while Ellesmere performs its own
+  supported animation without a competing or misleading duration control.
+- Empty non-Cinematic profiles now detach Frame Gambit's shared 20 Hz evaluator
+  until an event or editor mutation creates work again.
+- Actionable editor warnings now use a persistent, dismissible amber notice
+  with reserved layout space instead of being overwritten by the live-state
+  label or briefly painting over rule text.
+
+- Began the safe user-facing rename from Priority Fader to **Frame Gambit**.
+  The editor, addon metadata, keybinding category, diagnostics, and help copy
+  now use the new name and display the creator credit **by Mimezu**.
+- Added `/framegambit` and `/fgambit` aliases. Existing `/pfader`, addon-folder,
+  SavedVariables, profile export, frame names, and public API identifiers remain
+  unchanged for compatibility.
+- Fade transitions now finish in the exact configured time instead of using
+  repeated easing that could take roughly five times longer. Brief reveals
+  still complete before the configured wait and fade-out begin.
+- Expanded fade-out wait time from 5 seconds to 15 seconds.
+- Added a compact search field to Hover group, Linked children, and Visibility
+  children pickers.
+- Matched Resonance's raised custom close-button treatment so thick editor
+  borders cannot paint over the control.
+- Removed the duplicate header frame-picker action, moved the version and
+  creator credit to the top-right, and added a Resonance-style resize grip.
 
 ## 2.5.0 - stable CDM viewers and complete minimap flyout fading
 

@@ -206,5 +206,5 @@ if target then
     target.skipManagedAlphaHook = true
     target.capability = "EUI visibility overlay"
     target.capabilityTone = "teal"
-    target.capabilityNote = "Priority Fader controls the Player frame's final visibility wrapper while Ellesmere keeps layout, styling, and unit behavior."
+    target.capabilityNote = "Frame Gambit controls the Player frame's final visibility wrapper while Ellesmere keeps layout, styling, and unit behavior."
 end

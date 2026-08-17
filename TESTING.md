@@ -1,8 +1,47 @@
-# Priority Fader Retail validation
+# Frame Gambit Retail validation
 
 Run this with Ellesmere enabled on a character that can enter and leave combat.
 Use `/pfader audit` before and after the pass; it is read-only and reports the
 active profile, graph consistency, and currently unavailable adapters.
+
+## Help Center and guided tutorial
+
+1. Open Frame Gambit and confirm Help shows a small teal notification before
+   completing the tour.
+2. Open Help and switch through every topic. No frame setting should change.
+3. Start the tutorial on a profile with no managed targets. Complete the
+   practice-frame Manage, Mouseover, priority, and Otherwise actions. They
+   must gate Next without creating or changing a real target.
+4. Test Back, Next, Skip, the close button, and Escape; every exit must remove
+   the highlight and leave the editor usable. Clicking real Pick or Peek while
+   the tour is open must cancel cleanly and must not strand an overlay.
+5. On the priority step, select Quiet, Combat, Hover, and Both. Swap the first
+   two rows and confirm the displayed winner changes only for Both.
+6. Close and reopen the editor mid-tour. No tutorial overlay may remain.
+   Also click Help during the tour: the coach must close, Help must open above
+   the editor, and Resume must return to the saved step.
+7. Enter combat during the priority-board step. The tutorial card and outline
+   must disappear, accept no clicks, and resume at the same step after combat.
+8. Finish the tour and confirm the Help notification clears. Restart it, then
+   abort; completion and the cleared notification must be preserved.
+9. Run the tour for more than 2.5 seconds while Cinematic is active. Its card
+   and outline must remain fully visible through Cinematic root rescans.
+10. Resize the editor to 760x500. The subtitle must stop before Help, and the
+   compact tutorial must dock without drawing a highlight beneath its card.
+11. Compare the active profile before and after. Targets, reactions,
+   relationships, timing, and opacity must remain unchanged.
+
+## Cinematic letterbox
+
+1. Open Cinematic options, enable Black bars, and drag Bar height from 4% to
+   25%. While Cinematic is off the saved height must change without showing
+   either bar.
+2. Enable Cinematic and verify equal opaque black bars appear at the top and
+   bottom, remain mouse-transparent, and resize live with the height slider.
+3. Change UI scale or window resolution, then disable Cinematic. The bars must
+   resize proportionally and disappear immediately without affecting any
+   Blizzard, Ellesmere, OPie, DialogueUI, or other addon frame.
+4. Reset Cinematic defaults and verify the letterbox returns to Off at 10%.
 
 ## Out of combat
 
@@ -190,6 +229,37 @@ active profile, graph consistency, and currently unavailable adapters.
    rule must reveal the stack without changing button positions or clicks.
 3. Remove/reset the Minimap target and verify every escaped child returns to
    the opacity last requested by Blizzard or EUI, not a forced 100%.
+4. Cycle the experimental native-marker control through Leave unchanged, Hide
+   at 0%, and Scale with map. Verify Blizzard service/quest markers remain
+   unchanged in the first mode, disappear only at full rest in the second,
+   and shrink with the fade in the third. Reset/remove Minimap and verify
+   standard marker scale returns. Tracking categories must remain unchanged.
+5. While Hide at 0% is resting, change zones, change the tracked objective,
+   and open/close the map to force native marker rebuilds. No service, quest,
+   portal, or tracked-item marker may reappear and remain visible.
+6. Set a non-default native marker scale in the owning UI, enable each marker
+   mode, then reset/remove Minimap. The exact host scale must return. Repeat a
+   release during combat and verify restoration retries after combat.
+7. Export and re-import a profile using each marker mode. The mode must survive;
+   an older export without marker metadata must still import as Leave unchanged.
+8. On a client with no readable native icon-scale getter, verify the editor says
+   Markers: unavailable and explains why. It must not write or restore an
+   assumed 100% scale. If another UI later calls SetIconScale, reopen the editor
+   and verify the controls become available using that captured host value.
+
+## Ellesmere Chat
+
+1. With Ellesmere Chat enabled, configure the canonical Chat target at 0% rest
+   with Mouseover reveal. Verify its messages, background, tabs, sidebar and
+   chrome fade together and can wake again after reaching zero.
+2. Reset/remove Chat and verify Ellesmere immediately resumes its configured
+   visibility and idle-fade behavior. Repeat with Ellesmere Chat disabled and
+   verify the same target falls back to Blizzard ChatFrame1.
+3. Open Chat timing. The transition must be labelled as Ellesmere-owned and
+   disabled, while Frame Gambit's fade-out wait remains editable and honored.
+4. Try to remove the final unconditional Mouseover row from a relationship
+   that requires it. Verify a persistent amber notice receives its own layout
+   space, remains readable, and can be dismissed without overlapping rules.
 
 ## Ellesmere player visibility wrapper
 

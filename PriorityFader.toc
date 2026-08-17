@@ -1,7 +1,7 @@
 ## Interface: 120100
-## Title: Priority Fader
-## Notes: Compact, priority-based opacity reactions for your UI.
-## Author: Miche & Codex
+## Title: Frame Gambit
+## Notes: Friendly, priority-based visibility gambits for your UI.
+## Author: Mimezu
 ## Version: 2.5.0
 ## SavedVariables: PriorityFaderDB
 ## OptionalDeps: EllesmereUI, EllesmereUIDamageMeters, EllesmereUIQuickdraw, OPie, DialogueUI, Details, SpeedyAutoLoot
@@ -13,5 +13,8 @@ Targets.lua
 ProviderRoles.lua
 DetailsAdapter.lua
 EUIUnitVisibility.lua
+EUIChatVisibility.lua
 MinimapStack.lua
+CinematicLetterbox.lua
 Options.lua
+Tutorial.lua

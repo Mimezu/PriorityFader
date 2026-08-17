@@ -1,4 +1,4 @@
-# Priority Fader release plan
+# Frame Gambit release plan
 
 ## Cinematic Mode (v2.2.2)
 

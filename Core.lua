@@ -1,9 +1,9 @@
 local ADDON, ns = ...
 
-ns.NAME = "Priority Fader"
+ns.NAME = "Frame Gambit"
 ns.VERSION = "2.5.0"
-BINDING_HEADER_PRIORITYFADER = "Priority Fader"
-BINDING_NAME_PRIORITYFADER_TOGGLE_CINEMATIC = "Toggle Cinematic Mode"
+BINDING_HEADER_PRIORITYFADER = "Frame Gambit"
+BINDING_NAME_PRIORITYFADER_TOGGLE_CINEMATIC = "Toggle Frame Gambit Cinematic Mode"
 ns.MAX_REACTIONS_PER_TARGET = 32
 ns.COLORS = {
     panel = { 0.035, 0.04, 0.065, 0.98 },
@@ -18,9 +18,16 @@ ns.COLORS = {
 }
 
 local DEFAULTS = {
-    version = 10,
+    version = 11,
     profile = "Default",
-    cinematic = {},
+    tutorial = {
+        completed = false,
+        lastStep = 1,
+    },
+    cinematic = {
+        letterboxEnabled = false,
+        letterboxHeight = 0.10,
+    },
     profiles = {
         Default = {
             targets = {},
@@ -123,6 +130,7 @@ local runtime = {
     context = {},
     fadeOutStarted = {},
     revealGoal = {},
+    transitions = {},
     pendingRestore = setmetatable({}, { __mode = "k" }),
     pendingRelease = setmetatable({}, { __mode = "k" }),
     normalized = setmetatable({}, { __mode = "k" }),
@@ -143,6 +151,12 @@ local runtime = {
     playerCasting = false,
 }
 ns.runtime = runtime
+
+-- Declared here so the evaluator can deliberately detach its shared OnUpdate
+-- below, while the actual event driver remains created near the event list.
+-- Keeping one driver (rather than per-target frame handlers) is important for
+-- both performance and safe late-provider wakeups.
+local driver
 
 local SafeFrameAlpha
 
@@ -562,12 +576,32 @@ function ns:MigrateDatabase()
             if type(profile) == "table" then profile.visibilityLinks = {} end
         end
     end
+    if oldVersion < 11 then
+        db.tutorial = type(db.tutorial) == "table" and db.tutorial or {}
+    end
     -- Session-only roots cannot survive a reload. Do this every login rather
     -- than only during the schema migration that introduced them.
     for _, profile in pairs(db.profiles or {}) do
         RemoveProfileTargets(profile, function(id) return type(id) == "string" and id:match("^session_frame_") end)
     end
-    db.version = 10
+    db.version = 11
+end
+
+function ns:GetTutorialState()
+    PriorityFaderDB = type(PriorityFaderDB) == "table" and PriorityFaderDB or {}
+    PriorityFaderDB.tutorial = type(PriorityFaderDB.tutorial) == "table" and PriorityFaderDB.tutorial or {}
+    local state = PriorityFaderDB.tutorial
+    state.completed = state.completed == true
+    state.lastStep = math.max(1, math.min(8, math.floor(tonumber(state.lastStep) or 1)))
+    return state.lastStep, state.completed
+end
+
+function ns:SetTutorialState(step, completed)
+    self:GetTutorialState()
+    local state = PriorityFaderDB.tutorial
+    if step ~= nil then state.lastStep = math.max(1, math.min(8, math.floor(tonumber(step) or 1))) end
+    if completed ~= nil then state.completed = completed == true end
+    return state
 end
 
 local CINEMATIC_PROFILE_LABEL = "Cinematic Mode"
@@ -645,6 +679,8 @@ function ns:EnsureCinematicProfile()
     db.cinematic = type(db.cinematic) == "table" and db.cinematic or {}
     local cinematic = db.cinematic
     cinematic.actions = type(cinematic.actions) == "table" and cinematic.actions or {}
+    cinematic.letterboxEnabled = cinematic.letterboxEnabled == true
+    cinematic.letterboxHeight = math.max(0.04, math.min(0.25, tonumber(cinematic.letterboxHeight) or 0.10))
     cinematic.templateVersion = tonumber(cinematic.templateVersion) or 1
     local profileName = cinematic.profileName
     local created = false
@@ -720,6 +756,7 @@ function ns:InvalidateTargetTransition(id)
         seen[current] = true
         runtime.revealGoal[current] = nil
         runtime.fadeOutStarted[current] = nil
+        runtime.transitions[current] = nil
         for childID in pairs(type(links[current]) == "table" and links[current] or {}) do Clear(childID, seen) end
     end
     Clear(id, {})
@@ -1145,11 +1182,15 @@ function ns:ResetCinematicProfile()
         for id in pairs(runtime.fadeOutStarted) do runtime.fadeOutStarted[id] = nil end
     end
     for id in pairs(runtime.revealGoal) do runtime.revealGoal[id] = nil end
+    for id in pairs(runtime.transitions) do runtime.transitions[id] = nil end
     profile.targets, profile.groups, profile.links, profile.visibilityLinks = {}, {}, {}, {}
     profile.nextReactionID, profile.nextGroupID = 1, 1
     for _, component in ipairs(CINEMATIC_COMPONENTS) do
         profile.targets[component.id] = NewCinematicSettings(profile, component.default, component.rest)
     end
+    PriorityFaderDB.cinematic.letterboxEnabled = false
+    PriorityFaderDB.cinematic.letterboxHeight = 0.10
+    if self.RefreshCinematicLetterbox then self:RefreshCinematicLetterbox() end
     if self:IsCinematicActive() then
         if self.PrimeCinematicTargets then self:PrimeCinematicTargets() end
         self:BeginCinematicBlackout()
@@ -1228,7 +1269,12 @@ function ns:GetTargetSettings(id, create)
         settings.enabled = settings.enabled ~= false
         settings.atRest = tonumber(settings.atRest) or 0.12
         settings.fadeDuration = math.max(0.05, math.min(2, tonumber(settings.fadeDuration) or 0.20))
-        settings.fadeDelay = math.max(0, math.min(5, tonumber(settings.fadeDelay) or 0.80))
+        settings.fadeDelay = math.max(0, math.min(15, tonumber(settings.fadeDelay) or 0.80))
+        if id == "minimap" and settings.nativeMarkerMode ~= nil
+            and settings.nativeMarkerMode ~= "keep" and settings.nativeMarkerMode ~= "hide_zero"
+            and settings.nativeMarkerMode ~= "scale" then
+            settings.nativeMarkerMode = nil
+        end
         settings.reactions = type(settings.reactions) == "table" and settings.reactions or {}
         if not runtime.normalized[settings] then
             local valid = {}
@@ -1297,13 +1343,14 @@ function ns:PasteTargetRules(id)
     local clipboard = runtime.ruleClipboard
     settings.atRest = math.max(0, math.min(1, tonumber(clipboard.atRest) or 0.12))
     settings.fadeDuration = math.max(0.05, math.min(2, tonumber(clipboard.fadeDuration) or 0.20))
-    settings.fadeDelay = math.max(0, math.min(5, tonumber(clipboard.fadeDelay) or 0.80))
+    settings.fadeDelay = math.max(0, math.min(15, tonumber(clipboard.fadeDelay) or 0.80))
     settings.reactions = DeepCopy(clipboard.reactions)
     for _, reaction in ipairs(settings.reactions) do reaction.id = self:NextReactionID() end
     settings.cinematicMode = nil
     runtime.normalized[settings] = nil
     runtime.fadeOutStarted[id] = nil
     runtime.revealGoal[id] = nil
+    runtime.transitions[id] = nil
     runtime.immediateApply[id] = true
     self:Wake()
     self:RefreshOptions()
@@ -1312,6 +1359,8 @@ end
 
 function ns:RestoreControlledFrame(id)
     runtime.revealGoal[id] = nil
+    runtime.fadeOutStarted[id] = nil
+    runtime.transitions[id] = nil
     local frame = runtime.frameByID[id]
     if not frame then return end
     local target = self.TargetByID[id]
@@ -1376,8 +1425,10 @@ function ns:SelectProfile(name, preserveCinematicReturn)
     for id in pairs(runtime.hovered) do runtime.hovered[id] = nil end
     for id in pairs(runtime.fadeOutStarted) do runtime.fadeOutStarted[id] = nil end
     for id in pairs(runtime.revealGoal) do runtime.revealGoal[id] = nil end
+    for id in pairs(runtime.transitions) do runtime.transitions[id] = nil end
     for id in pairs(runtime.immediateApply) do runtime.immediateApply[id] = nil end
     db.profile = name
+    if self.RefreshCinematicLetterbox then self:RefreshCinematicLetterbox() end
     if not preserveCinematicReturn and db.cinematic and db.cinematic.profileName ~= name then
         db.cinematic.returnProfile = nil
     end
@@ -1483,8 +1534,16 @@ function ns:ExportProfile(name)
             local enabled = "1"
             local atRest = math.max(0, math.min(1, tonumber(settings.atRest) or 0.12))
             local fadeDuration = math.max(0.05, math.min(2, tonumber(settings.fadeDuration) or 0.20))
-            local fadeDelay = math.max(0, math.min(5, tonumber(settings.fadeDelay) or 0.80))
+            local fadeDelay = math.max(0, math.min(15, tonumber(settings.fadeDelay) or 0.80))
             lines[#lines + 1] = table.concat({ "T", EncodeField(targetID), enabled, atRest, fadeDuration, fadeDelay }, "|")
+            -- Keep this as an optional, independent entry instead of changing
+            -- the T record's shape.  Existing Frame Gambit/PriorityFader
+            -- imports continue to parse, and old exports simply mean "keep".
+            -- It is deliberately limited to the native Minimap marker
+            -- compositor; no arbitrary per-adapter settings cross profiles.
+            if targetID == "minimap" and (settings.nativeMarkerMode == "keep" or settings.nativeMarkerMode == "hide_zero" or settings.nativeMarkerMode == "scale") then
+                lines[#lines + 1] = table.concat({ "M", EncodeField(targetID), settings.nativeMarkerMode }, "|")
+            end
             for _, reaction in ipairs(type(settings.reactions) == "table" and settings.reactions or {}) do
                 local info = type(reaction) == "table" and CONDITION_INFO[reaction.condition]
                 if info and not info.internal and type(reaction.id) == "number" then
@@ -1533,13 +1592,13 @@ function ns:ExportProfile(name)
 end
 
 function ns:ParseProfileImport(text)
-    if type(text) ~= "string" or #text > 60000 then return ImportFailure("Paste a Priority Fader export under 60 KB.") end
+    if type(text) ~= "string" or #text > 60000 then return ImportFailure("Paste a Frame Gambit export under 60 KB.") end
     text = text:gsub("\r\n", "\n"):gsub("\n+$", "")
     local checksum, body = text:match("^PriorityFader%-1:([0-9A-Fa-f]+)\r?\n([%s%S]+)$")
     if not checksum or not body or checksum:upper() ~= ProfileChecksum(body) then return ImportFailure("That export is incomplete or has been changed.") end
     local lines = {}
     for line in body:gmatch("[^\r\n]+") do lines[#lines + 1] = line end
-    if lines[1] ~= "PF1" then return ImportFailure("This is not a Priority Fader profile export.") end
+    if lines[1] ~= "PF1" then return ImportFailure("This is not a Frame Gambit profile export.") end
     local profile = { targets = {}, groups = {}, links = {}, visibilityLinks = {}, nextReactionID = 1, nextGroupID = 1 }
     local reactionIDs, reactionsByTarget, memberToGroup, visibilityParentByChild = {}, {}, {}, {}
     local targetCount, reactionCount, groupCount, edgeCount = 0, 0, 0, 0
@@ -1550,10 +1609,21 @@ function ns:ParseProfileImport(text)
             local id = DecodeField(fields[2])
             local atRest = ImportNumber(fields[4], 0, 1)
             local fadeDuration = ImportNumber(fields[5], 0.05, 2)
-            local fadeDelay = ImportNumber(fields[6], 0, 5)
+            local fadeDelay = ImportNumber(fields[6], 0, 15)
             if not IsSafeImportID(id) or profile.targets[id] or fields[3] ~= "1" or not atRest or not fadeDuration or not fadeDelay then return ImportFailure("A target entry is invalid.") end
             targetCount = targetCount + 1; if targetCount > 120 then return ImportFailure("An import can contain at most 120 targets.") end
             profile.targets[id] = { enabled = true, atRest = atRest, fadeDuration = fadeDuration, fadeDelay = fadeDelay, reactions = {} }
+        elseif tag == "M" and #fields == 3 then
+            local targetID, mode = DecodeField(fields[2]), fields[3]
+            -- Only accept the known compositor modes and only on the native
+            -- Minimap target. Old exports omit the record and retain the same
+            -- effective default: "keep".
+            if targetID ~= "minimap" or not profile.targets[targetID]
+                or (mode ~= "keep" and mode ~= "hide_zero" and mode ~= "scale")
+                or profile.targets[targetID].nativeMarkerMode ~= nil then
+                return ImportFailure("A Minimap marker setting is invalid.")
+            end
+            profile.targets[targetID].nativeMarkerMode = mode
         elseif tag == "R" and #fields == 7 then
             local targetID, condition, requirements = DecodeField(fields[2]), DecodeField(fields[4]), DecodeField(fields[7])
             local id = ImportNumber(fields[3], 1, 1000000000)
@@ -2216,11 +2286,12 @@ function ns:UpdateHover()
     end
 end
 
-function ns:ApplyTarget(id, elapsed)
+function ns:ApplyTarget(id)
     local settings = self:GetTargetSettings(id)
     if not settings or not settings.enabled then
         runtime.fadeOutStarted[id] = nil
         runtime.revealGoal[id] = nil
+        runtime.transitions[id] = nil
         return
     end
     local frame, target = self:ResolveTarget(id)
@@ -2229,6 +2300,7 @@ function ns:ApplyTarget(id, elapsed)
     if not frame then
         runtime.fadeOutStarted[id] = nil
         runtime.revealGoal[id] = nil
+        runtime.transitions[id] = nil
         runtime.active[id] = { unavailable = true }
         return
     end
@@ -2237,6 +2309,7 @@ function ns:ApplyTarget(id, elapsed)
     if not self:RestorePendingFrame(frame) then
         runtime.fadeOutStarted[id] = nil
         runtime.revealGoal[id] = nil
+        runtime.transitions[id] = nil
         runtime.active[id] = { pendingRestore = true }
         return
     end
@@ -2245,6 +2318,7 @@ function ns:ApplyTarget(id, elapsed)
         if not acquired or usable == false then
             runtime.fadeOutStarted[id] = nil
             runtime.revealGoal[id] = nil
+            runtime.transitions[id] = nil
             runtime.active[id] = { unavailable = true }
             return
         end
@@ -2259,6 +2333,7 @@ function ns:ApplyTarget(id, elapsed)
         if current == nil then
             runtime.fadeOutStarted[id] = nil
             runtime.revealGoal[id] = nil
+            runtime.transitions[id] = nil
             runtime.active[id] = { hostHidden = true }
             return
         end
@@ -2274,6 +2349,7 @@ function ns:ApplyTarget(id, elapsed)
             runtime.baseAlpha[frame] = live
             runtime.currentAlpha[frame] = live
             current = live
+            runtime.transitions[id] = nil
         end
     end
     -- A short-lived reveal is a complete visual action, not merely a sample
@@ -2322,6 +2398,7 @@ function ns:ApplyTarget(id, elapsed)
         -- addon frame from appearing bright for one tick (or for fadeDelay)
         -- when its owner later shows it.
         runtime.fadeOutStarted[id] = nil
+        runtime.transitions[id] = nil
         if math.abs(current - desired) > 0.001 then
             if SetManagedFrameAlpha(frame, desired) then
                 current = desired
@@ -2343,6 +2420,7 @@ function ns:ApplyTarget(id, elapsed)
         runtime.immediateApply[id] = nil
         runtime.fadeOutStarted[id] = nil
         runtime.revealGoal[id] = nil
+        runtime.transitions[id] = nil
         if math.abs(current - desired) > 0.001 and SetManagedFrameAlpha(frame, desired) then
             current = desired
             runtime.currentAlpha[frame] = desired
@@ -2360,8 +2438,9 @@ function ns:ApplyTarget(id, elapsed)
     end
     local now = GetTime()
     if desired < current and (settings.fadeDelay or 0) > 0 then
-        -- Keep the start of this fade-out transition, not a frozen deadline,
-        -- so a live delay edit takes effect immediately without restarting it.
+        -- Keep the start of this fade-out transition, not a frozen deadline.
+        -- A timing edit explicitly invalidates this state and starts a fresh,
+        -- predictable wait using the newly selected values.
         runtime.fadeOutStarted[id] = runtime.fadeOutStarted[id] or now
         if now < runtime.fadeOutStarted[id] + settings.fadeDelay then
             runtime.active[id] = { alpha = current, desired = desired, index = index, reaction = reaction, inheritedFrom = inheritedFrom, hostHidden = false, protected = target and target.protected }
@@ -2370,13 +2449,60 @@ function ns:ApplyTarget(id, elapsed)
     else
         runtime.fadeOutStarted[id] = nil
     end
+    -- Some semantic adapters expose a supported target-alpha authority while
+    -- their host UI deliberately owns the physical animation. Request the
+    -- resolved opacity once, after Frame Gambit's wait policy, instead of
+    -- feeding that host a second competing interpolation.
+    if target and target.timingOwner == "host" then
+        runtime.transitions[id] = nil
+        if math.abs(current - desired) > 0.001 and SetManagedFrameAlpha(frame, desired) then
+            current = desired
+            runtime.currentAlpha[frame] = desired
+        end
+        runtime.active[id] = {
+            alpha = current,
+            desired = desired,
+            index = index,
+            reaction = reaction,
+            inheritedFrom = inheritedFrom,
+            hostHidden = false,
+            protected = target.protected,
+        }
+        return
+    end
+    -- Transitions are measured from a fixed starting point.  Repeatedly
+    -- interpolating from the previous tick turns the duration into an easing
+    -- time constant (a 1s setting took roughly 5s to settle).  An absolute
+    -- transition makes the value in the UI the actual end-to-end duration and
+    -- remains deterministic across frame-rate stalls.
     local duration = math.max(0.01, settings.fadeDuration or 0.2)
-    local step = elapsed and math.min(1, elapsed / duration) or 1
-    local alpha = current + (desired - current) * step
-    if math.abs(alpha - desired) < 0.005 then alpha = desired end
+    local transition = runtime.transitions[id]
+    if math.abs(current - desired) <= 0.001 then
+        runtime.transitions[id] = nil
+    elseif not transition or transition.frame ~= frame or math.abs(transition.to - desired) > 0.001 then
+        transition = { frame = frame, from = current, to = desired, startedAt = now }
+        runtime.transitions[id] = transition
+    end
+    local alpha = desired
+    local transitionComplete = false
+    if transition then
+        local progress = math.min(1, math.max(0, (now - transition.startedAt) / duration))
+        alpha = transition.from + (transition.to - transition.from) * progress
+        if progress >= 1 then
+            alpha = transition.to
+            transitionComplete = true
+        end
+    end
     if math.abs(alpha - current) > 0.001 then
         local ok = SetManagedFrameAlpha(frame, alpha)
-        if ok then runtime.currentAlpha[frame] = alpha else alpha = current end
+        if ok then
+            runtime.currentAlpha[frame] = alpha
+            if transitionComplete then runtime.transitions[id] = nil end
+        else
+            alpha = current
+        end
+    elseif transitionComplete then
+        runtime.transitions[id] = nil
     end
     runtime.active[id] = {
         alpha = alpha,
@@ -2398,7 +2524,37 @@ function ns:PrimeCinematicTargets()
         ids[#ids + 1] = id
         runtime.immediateApply[id] = true
     end
-    for _, id in ipairs(ids) do self:ApplyTarget(id, nil) end
+    for _, id in ipairs(ids) do self:ApplyTarget(id) end
+end
+
+local function HasRuntimeEntries(values)
+    return type(values) == "table" and next(values) ~= nil
+end
+
+function ns:HasEvaluatorWork()
+    -- This is intentionally conservative.  Any configured/enabled target
+    -- keeps the evaluator alive for mouse, motion, moments and late adapter
+    -- availability.  We only idle when there is literally no controlled UI,
+    -- no Cinematic scene, and no unfinished ownership/transition work.
+    if not PriorityFaderDB then return true end
+    if self:IsCinematicActive() then return true end
+    local profile = self:Profile()
+    for _, settings in pairs(type(profile.targets) == "table" and profile.targets or {}) do
+        if type(settings) == "table" and settings.enabled ~= false then return true end
+    end
+    return HasRuntimeEntries(runtime.pendingRestore)
+        or HasRuntimeEntries(runtime.pendingRelease)
+        or HasRuntimeEntries(runtime.transitions)
+        or HasRuntimeEntries(runtime.fadeOutStarted)
+        or HasRuntimeEntries(runtime.revealGoal)
+        or HasRuntimeEntries(runtime.immediateApply)
+        or HasRuntimeEntries(runtime.cinematicBlackout)
+        or (self.HasMinimapStackPendingWork and self:HasMinimapStackPendingWork())
+        or runtime.cinematicScanPending == true
+end
+
+function ns:Sleep()
+    if driver and driver:GetScript("OnUpdate") then driver:SetScript("OnUpdate", nil) end
 end
 
 function ns:Tick(elapsed)
@@ -2407,7 +2563,6 @@ function ns:Tick(elapsed)
     -- targets.  Alpha transitions remain smooth at 20 Hz without an OnUpdate
     -- handler per frame.
     if now - runtime.lastTick < 0.05 then return end
-    local delta = now - runtime.lastTick
     runtime.lastTick = now
     if now - runtime.lastMouseTick >= 0.08 then
         runtime.lastMouseTick = now
@@ -2415,7 +2570,7 @@ function ns:Tick(elapsed)
     end
     self:BuildStateContext()
     local profile = self:Profile()
-    for id in pairs(profile.targets or {}) do self:ApplyTarget(id, delta) end
+    for id in pairs(profile.targets or {}) do self:ApplyTarget(id) end
     if self.UpdateMinimapStack then
         local rescan = now - (runtime.lastMinimapStackScan or 0) >= 1
         if rescan then runtime.lastMinimapStackScan = now end
@@ -2436,6 +2591,10 @@ function ns:Tick(elapsed)
         end
     end
     if self.Options and self.Options:IsVisible() then self:RefreshActiveState() end
+    -- An empty profile should not keep a 20 Hz evaluator alive forever.  All
+    -- game events, editor mutations, profile selection and late addon loads
+    -- already call Wake(), so this does not trade correctness for idling.
+    if not self:HasEvaluatorWork() then self:Sleep() end
 end
 
 local function SafeDiagnosticText(text)
@@ -2450,7 +2609,7 @@ end
 
 local function DiagnosticMessage(text, color)
     local target = DEFAULT_CHAT_FRAME
-    if target and target.AddMessage then target:AddMessage("|cff9D75FFPriority Fader|r " .. SafeDiagnosticText(text), color and color[1], color and color[2], color and color[3]) end
+    if target and target.AddMessage then target:AddMessage("|cff9D75FFFrame Gambit|r " .. SafeDiagnosticText(text), color and color[1], color and color[2], color and color[3]) end
 end
 
 function ns:RunDiagnostics()
@@ -2618,7 +2777,7 @@ local function RefreshPlayerCastingState()
     if ok and not IsSecret(casting) then runtime.playerCasting = casting == true end
 end
 
-local driver = CreateFrame("Frame")
+driver = CreateFrame("Frame")
 driver:RegisterEvent("PLAYER_LOGIN")
 driver:RegisterEvent("ADDON_LOADED")
 driver:RegisterEvent("PLAYER_REGEN_DISABLED")
@@ -2679,6 +2838,7 @@ driver:SetScript("OnEvent", function(_, event, ...)
         ns:MigrateDatabase()
         if ns.RegisterStoredCustomFrames then ns:RegisterStoredCustomFrames() end
         ns:EnsureCinematicProfile()
+        if ns.RefreshCinematicLetterbox then ns:RefreshCinematicLetterbox() end
         if ns.RefreshOPieFrames then ns:RefreshOPieFrames() end
         ns:RegisterCinematicUIMode()
         ns:EnsureConnectedHoverRules()
@@ -2709,6 +2869,13 @@ driver:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_ENTERING_WORLD" then RefreshPlayerCastingState() end
     if ns.CancelPicker and (event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_ENTERING_WORLD" or event == "PET_BATTLE_OPENING_START") then
         ns:CancelPicker(event == "PLAYER_REGEN_DISABLED" and "combat" or "interrupted")
+    end
+    if event == "PLAYER_REGEN_DISABLED" and ns.OnTutorialCombatStateChanged then
+        ns:OnTutorialCombatStateChanged(true)
+    elseif event == "PLAYER_REGEN_ENABLED" and ns.OnTutorialCombatStateChanged then
+        ns:OnTutorialCombatStateChanged(false)
+    elseif (event == "PLAYER_ENTERING_WORLD" or event == "PET_BATTLE_OPENING_START") and ns.CancelTutorial then
+        ns:CancelTutorial("interrupted")
     end
     if event == "PLAYER_REGEN_DISABLED" and ns.CinematicKeyCapture and ns.CinematicKeyCapture:IsShown() then
         ns.CinematicKeyCapture:Hide()
@@ -2741,10 +2908,12 @@ end)
 
 SLASH_PRIORITYFADER1 = "/pfader"
 SLASH_PRIORITYFADER2 = "/priorityfader"
+SLASH_PRIORITYFADER3 = "/framegambit"
+SLASH_PRIORITYFADER4 = "/fgambit"
 function PriorityFader_ToggleCinematic()
     local ok, reason, enabled = ns:ToggleCinematic()
     if not ok and DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cff9D75FFPriority Fader|r " .. tostring(reason or "Cinematic Mode could not be toggled."))
+        DEFAULT_CHAT_FRAME:AddMessage("|cff9D75FFFrame Gambit|r " .. tostring(reason or "Cinematic Mode could not be toggled."))
     elseif ok and ns.Options and ns.Options.active then
         ns.Options.active:SetText(enabled and "Cinematic Mode on" or "Cinematic Mode off")
         ns.Options.active:SetTextColor(unpack(ns.COLORS.teal))

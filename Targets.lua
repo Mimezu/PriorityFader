@@ -10,9 +10,9 @@ ns.Targets = {
     { id = "eui_bar4", label = "Action Bar 4", source = "Ellesmere", names = { "EABBar_Bar4", "MultiBarRight" }, protected = true },
     { id = "eui_bar5", label = "Action Bar 5", source = "Ellesmere", names = { "EABBar_Bar5", "MultiBarLeft" }, protected = true },
     { id = "eui_castbar", label = "Cast Bar", source = "Ellesmere / Blizzard", names = { "ERB_CastBarFrame", "PlayerCastingBarFrame" }, protected = true,
-        capability = "Visibility overlay", capabilityTone = "teal", capabilityNote = "Priority Fader changes only the bar's final opacity. Ellesmere or Blizzard keeps its styling, placement, and casting behavior." },
+        capability = "Visibility overlay", capabilityTone = "teal", capabilityNote = "Frame Gambit changes only the bar's final opacity. Ellesmere or Blizzard keeps its styling, placement, and casting behavior." },
     { id = "eui_resourcebars", label = "Resource Bars", source = "Ellesmere", names = { "EllesmereUIResourceBarsFrame" }, protected = false,
-        capability = "Container visibility", capabilityTone = "teal", capabilityNote = "Priority Fader fades Ellesmere's shared Resource Bars container. Ellesmere keeps every bar's styling, values, and layout." },
+        capability = "Container visibility", capabilityTone = "teal", capabilityNote = "Frame Gambit fades Ellesmere's shared Resource Bars container. Ellesmere keeps every bar's styling, values, and layout." },
     { id = "cdm_cooldowns", label = "CDM · Cooldowns", source = "Blizzard CDM / Ellesmere", names = { "EssentialCooldownViewer" }, protected = true,
         capability = "Viewer-level fade", capabilityTone = "teal", capabilityNote = "Fades the complete Cooldowns viewer. Ellesmere keeps every icon's bar placement, styling, alerts, and gameplay state." },
     { id = "cdm_utility", label = "CDM · Utility", source = "Blizzard CDM / Ellesmere", names = { "UtilityCooldownViewer" }, protected = true,
@@ -31,7 +31,8 @@ ns.Targets = {
     { id = "eui_boss4", label = "Boss Frame 4", source = "Ellesmere", names = { "EllesmereUIUnitFrames_Boss4", "Boss4TargetFrame" }, protected = true },
     { id = "eui_boss5", label = "Boss Frame 5", source = "Ellesmere", names = { "EllesmereUIUnitFrames_Boss5", "Boss5TargetFrame" }, protected = true },
     { id = "eui_raid", label = "Raid Frames", source = "Ellesmere", names = { "EllesmereUIRaidFrameContainer", "CompactRaidFrameContainer" }, protected = true },
-    { id = "chat", label = "Chat", source = "Blizzard", names = { "ChatFrame1" }, protected = false },
+    { id = "chat", label = "Chat", source = "Ellesmere Chat / Blizzard", names = { "ChatFrame1" }, protected = false,
+        capability = "Chat visibility", capabilityTone = "teal", capabilityNote = "Uses Ellesmere's complete chat stack when available, otherwise fades Blizzard's primary chat frame." },
     { id = "minimap", label = "Minimap", source = "Blizzard", names = { "Minimap" }, protected = false },
     { id = "objectives", label = "Objectives", source = "Blizzard", names = { "ObjectiveTrackerFrame" }, protected = false },
     { id = "blizzard_damage_meter", label = "Blizzard Damage Meter", source = "Blizzard", names = { "DamageMeterSessionWindow1" }, protected = false,
@@ -78,6 +79,15 @@ function ns:RegisterTarget(definition)
         and definition.capabilityTone ~= "amber" and definition.capabilityTone ~= "muted" then
         return false, "Capability tone must be teal, accent, amber, or muted."
     end
+    if definition.timingOwner ~= nil and definition.timingOwner ~= "host" then
+        return false, "Timing owner must be host when supplied."
+    end
+    if definition.timingLabel ~= nil and (type(definition.timingLabel) ~= "string" or #definition.timingLabel > 48) then
+        return false, "Timing label must be 48 characters or fewer."
+    end
+    if definition.timingNote ~= nil and (type(definition.timingNote) ~= "string" or #definition.timingNote > 240) then
+        return false, "Timing note must be 240 characters or fewer."
+    end
     if definition.acquire ~= nil and type(definition.acquire) ~= "function" then
         return false, "Target acquire must be a function."
     end
@@ -100,6 +110,9 @@ function ns:RegisterTarget(definition)
         capability = definition.capability,
         capabilityTone = definition.capabilityTone,
         capabilityNote = definition.capabilityNote,
+        timingOwner = definition.timingOwner,
+        timingLabel = definition.timingLabel,
+        timingNote = definition.timingNote,
         names = definition.names,
         resolve = definition.resolve,
         acquire = definition.acquire,
@@ -160,7 +173,7 @@ function ns:GetTargetAvailability(targetOrID)
     if target.external then
         note = source .. " has not supplied this frame yet. Check that the provider is enabled and its UI is loaded."
     else
-        note = "Priority Fader cannot find this " .. source .. " frame right now. It may appear when that part of the UI is active."
+        note = "Frame Gambit cannot find this " .. source .. " frame right now. It may appear when that part of the UI is active."
     end
     return false, nil, "Unavailable", note, "amber"
 end
@@ -213,7 +226,9 @@ function ns:IsPriorityFaderFrame(frame)
     while current and not seen[current] do
         if current == self.Options or current == self.Picker or current == self.CinematicOptions
             or current == self.SelectionOutline
+            or current == self.HelpCenter or current == self.TutorialCard or current == self.TutorialOutline
             or current == self.PeekBar
+            or (self.IsCinematicLetterboxFrame and self:IsCinematicLetterboxFrame(current))
             or current == self.ReactionPalette or current == self.OpacityPicker
             or current == self.ProfilePicker or current == self.CinematicKeyCapture then return true end
         seen[current] = true
@@ -855,7 +870,7 @@ function ns:RegisterDiscoveredFrame(frame, label, exactFrame)
                 names = { name },
                 protected = true,
                 capability = exactFrame and "Named UI frame" or "Named UI root",
-                capabilityNote = "Priority Fader fades this frame only. Its addon keeps ownership of layout, styling, and behavior.",
+                capabilityNote = "Frame Gambit fades this frame only. Its addon keeps ownership of layout, styling, and behavior.",
                 capabilityTone = "teal",
             })
             if not registered then return nil, reason end
@@ -896,7 +911,7 @@ function ns:RegisterStoredCustomFrames()
                 names = { entry.name },
                 protected = true,
                 capability = entry.exact == true and "Named UI frame" or "Named UI root",
-                capabilityNote = "Priority Fader fades this frame only. Its addon keeps ownership of layout, styling, and behavior.",
+                capabilityNote = "Frame Gambit fades this frame only. Its addon keeps ownership of layout, styling, and behavior.",
                 capabilityTone = "teal",
             })
         end

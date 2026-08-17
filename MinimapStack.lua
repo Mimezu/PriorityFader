@@ -15,6 +15,25 @@ local pending = setmetatable({}, { __mode = "k" })
 local hoverExcluded = setmetatable({}, { __mode = "k" })
 local multiplier = 1
 local scan
+local nativeMarkerScale
+local nativeMarkerWanted
+-- The native marker compositor is separate from the Minimap alpha tree.  Do
+-- not invent a default here: some layouts/addons use a non-default icon scale
+-- and SetIconScale has no portable, guaranteed getter on every Retail build.
+local nativeMarkerHostScale
+local nativeMarkerMode
+local nativeMarkerAlpha = 1
+local nativeMarkerGuard = false
+local nativeMarkerHooked = false
+local nativeMarkerAuditAt = 0
+local nativeMarkerRestorePending = false
+
+ns.MINIMAP_NATIVE_MARKER_MODES = {
+    keep = "Leave unchanged",
+    hide_zero = "Hide at 0%",
+    scale = "Scale with map",
+}
+ns.MINIMAP_NATIVE_MARKER_ORDER = { "keep", "hide_zero", "scale" }
 
 local function IsSecret(value)
     return issecretvalue and issecretvalue(value) or false
@@ -23,6 +42,14 @@ end
 local function ValidAlpha(value)
     return type(value) == "number" and not IsSecret(value) and value == value
         and value >= 0 and value <= 1
+end
+
+-- Unlike alpha, an icon scale is not bounded to 1.  Keep the validation
+-- intentionally permissive so a host's legitimate large scale survives our
+-- temporary compositor override and its later restoration.
+local function ValidScale(value)
+    return type(value) == "number" and not IsSecret(value) and value == value
+        and value >= 0 and value < math.huge
 end
 
 local function Method(object, name, ...)
@@ -297,6 +324,149 @@ local function ProcessPending()
     end
 end
 
+local function ReadNativeMarkerScale(minimap)
+    -- GetIconScale is available on current Retail builds, but it is deliberately
+    -- optional here: UI skins and older client variants do not all publish it.
+    -- A future host SetIconScale call is the other authoritative source.
+    local value = Method(minimap, "GetIconScale")
+    return ValidScale(value) and value or nil
+end
+
+local function CaptureNativeMarkerHostScale(minimap)
+    if nativeMarkerHostScale ~= nil then return nativeMarkerHostScale end
+    local value = ReadNativeMarkerScale(minimap)
+    if value ~= nil then nativeMarkerHostScale = value end
+    return nativeMarkerHostScale
+end
+
+local function SetNativeMarkerScale(minimap, value)
+    if not minimap or not ValidScale(value) then return false end
+    local okMethod, setter = pcall(function() return minimap.SetIconScale end)
+    if not okMethod or type(setter) ~= "function" then return false end
+    nativeMarkerGuard = true
+    local ok = pcall(setter, minimap, value)
+    nativeMarkerGuard = false
+    return ok
+end
+
+local function HookNativeMarkers(minimap)
+    if nativeMarkerHooked or not minimap or type(hooksecurefunc) ~= "function" then return end
+    local ok = pcall(hooksecurefunc, minimap, "SetIconScale", function(_, value)
+        if nativeMarkerGuard or not ValidScale(value) then return end
+        nativeMarkerHostScale = value
+        nativeMarkerScale = value
+        nativeMarkerRestorePending = false
+        local wanted
+        if nativeMarkerMode == "scale" then
+            wanted = value * nativeMarkerAlpha
+        elseif nativeMarkerMode == "hide_zero" then
+            wanted = nativeMarkerAlpha <= 0.001 and 0 or value
+        end
+        nativeMarkerWanted = wanted
+        if wanted ~= nil and math.abs(value - wanted) > 0.001 then
+            if SetNativeMarkerScale(minimap, wanted) then
+                nativeMarkerScale = wanted
+                nativeMarkerAuditAt = GetTime()
+            end
+        end
+    end)
+    if ok then nativeMarkerHooked = true end
+end
+
+local function RestoreNativeMarkers(minimap)
+    -- If an override was never applied there is nothing to put back.  Clear
+    -- immediately rather than attempting to "restore" an assumed scale.
+    if nativeMarkerScale == nil then
+        nativeMarkerWanted = nil
+        nativeMarkerMode = nil
+        nativeMarkerAlpha = 1
+        nativeMarkerRestorePending = false
+        nativeMarkerAuditAt = 0
+        return true
+    end
+
+    -- Stop composing immediately, even if the host setter is temporarily
+    -- unavailable.  A later host SetIconScale call must become the new host
+    -- baseline instead of being transformed by the old fade mode.
+    nativeMarkerWanted = nil
+    nativeMarkerMode = nil
+    nativeMarkerAlpha = 1
+    local restore = CaptureNativeMarkerHostScale(minimap)
+    if restore == nil then
+        -- We never overwrite an unknown host scale.  Keep retrying in case the
+        -- client later exposes a getter or the host calls SetIconScale.
+        nativeMarkerRestorePending = true
+        return false
+    end
+
+    if math.abs(nativeMarkerScale - restore) > 0.001 and not SetNativeMarkerScale(minimap, restore) then
+        -- Failed setters are transient during client rebuilds/lockdown.  Do
+        -- not lose the original host scale; the next update will retry.
+        nativeMarkerRestorePending = true
+        return false
+    end
+
+    nativeMarkerScale = nil
+    -- Keep the last authoritative host baseline. Some Retail builds expose
+    -- SetIconScale without a matching getter, so forgetting a value announced
+    -- by the host would make the safe experimental modes unavailable again on
+    -- the very next keep-mode update. A later host setter refreshes this value
+    -- through HookNativeMarkers.
+    nativeMarkerRestorePending = false
+    nativeMarkerAuditAt = 0
+    return true
+end
+
+local function UpdateNativeMarkers(minimap, alpha, mode)
+    if mode ~= "hide_zero" and mode ~= "scale" then
+        RestoreNativeMarkers(minimap)
+        return
+    end
+    HookNativeMarkers(minimap)
+    local hostScale = CaptureNativeMarkerHostScale(minimap)
+    if hostScale == nil then
+        -- A safe baseline is required before changing the compositor.  This
+        -- avoids changing a host's non-default icon scale merely because its
+        -- API did not offer a readable value at the moment we enabled PF.
+        nativeMarkerMode = mode
+        nativeMarkerAlpha = alpha
+        nativeMarkerWanted = nil
+        return
+    end
+    nativeMarkerMode = mode
+    nativeMarkerAlpha = alpha
+    nativeMarkerRestorePending = false
+    local wanted = mode == "scale" and (hostScale * alpha)
+        or (alpha <= 0.001 and 0 or hostScale)
+    nativeMarkerWanted = wanted
+    local now = GetTime()
+    -- Blizzard's native blip compositor can rebuild without making a Lua
+    -- SetIconScale call. Reassert at a low rate so a rebuilt quest/service-pin
+    -- layer cannot remain visible while the Minimap is fully faded.
+    local auditDue = wanted <= 0.001 and now - nativeMarkerAuditAt >= 0.25
+    if auditDue or nativeMarkerScale == nil or math.abs(nativeMarkerScale - wanted) > 0.001 then
+        if SetNativeMarkerScale(minimap, wanted) then
+            nativeMarkerScale = wanted
+            nativeMarkerAuditAt = now
+        end
+    end
+end
+
+function ns:GetMinimapNativeMarkerAvailability()
+    local minimap = _G.Minimap
+    if not minimap then return false, "The native Minimap is not available." end
+    -- Install the read-only post-hook even while leaving markers unchanged. If
+    -- Blizzard or the owning UI later announces a scale, experimental modes
+    -- can become available without guessing or requiring a reload.
+    HookNativeMarkers(minimap)
+    if CaptureNativeMarkerHostScale(minimap) ~= nil then return true end
+    return false, "This WoW build does not expose the current native marker scale. Frame Gambit will not assume 100% and risk restoring the wrong host value."
+end
+
+function ns:HasMinimapStackPendingWork()
+    return nativeMarkerRestorePending == true or scan ~= nil or next(pending) ~= nil
+end
+
 function ns:UpdateMinimapStack(rescan)
     ProcessPending()
     local minimap = _G.Minimap
@@ -309,8 +479,11 @@ function ns:UpdateMinimapStack(rescan)
         for _, frame in ipairs(frames) do Release(frame) end
         multiplier = 1
         scan = nil
+        RestoreNativeMarkers(minimap or _G.Minimap)
         return
     end
+    local settings = self.GetTargetSettings and self:GetTargetSettings("minimap")
+    UpdateNativeMarkers(minimap, nextMultiplier, settings and settings.nativeMarkerMode or "keep")
     local changed = math.abs(multiplier - nextMultiplier) > 0.001
     multiplier = nextMultiplier
     if rescan and not scan then BeginScan(minimap) end
