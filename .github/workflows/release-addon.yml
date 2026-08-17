@@ -39,14 +39,18 @@ jobs:
         if: steps.version.outputs.release == 'true'
         shell: bash
         run: |
-          mkdir -p "PriorityFader"
+          STAGE="$(mktemp -d)"
+          mkdir -p "$STAGE/PriorityFader"
           rsync -a \
             --exclude=".git" \
             --exclude=".github" \
             --exclude="*.zip" \
             --exclude=".DS_Store" \
-            ./ "PriorityFader/"
-          zip -qr "PriorityFader.zip" "PriorityFader"
+            ./ "$STAGE/PriorityFader/"
+          (
+            cd "$STAGE"
+            zip -qr "$GITHUB_WORKSPACE/PriorityFader.zip" "PriorityFader"
+          )
 
       - name: Publish GitHub Release
         if: steps.version.outputs.release == 'true'
