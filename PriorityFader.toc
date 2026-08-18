@@ -1,8 +1,11 @@
+Exit code: 0
+Wall time: 0.5 seconds
+Output:
 ## Interface: 120100
 ## Title: Frame Gambit
 ## Notes: Friendly, priority-based visibility gambits for your UI.
 ## Author: Mimezu
-## Version: 2.5.0
+## Version: 2.6.0
 ## SavedVariables: PriorityFaderDB
 ## OptionalDeps: EllesmereUI, EllesmereUIDamageMeters, EllesmereUIQuickdraw, OPie, DialogueUI, Details, SpeedyAutoLoot
 ## IconTexture: Interface\Icons\Spell_Mage_ArcaneOrb
@@ -18,3 +21,4 @@ MinimapStack.lua
 CinematicLetterbox.lua
 Options.lua
 Tutorial.lua
+

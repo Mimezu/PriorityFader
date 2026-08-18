@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.4 seconds
+Output:
 local ADDON, ns = ...
 
 -- Some Minimap descendants deliberately ignore parent alpha (notably pooled
@@ -17,16 +20,34 @@ local multiplier = 1
 local scan
 local nativeMarkerScale
 local nativeMarkerWanted
--- The native marker compositor is separate from the Minimap alpha tree.  Do
--- not invent a default here: some layouts/addons use a non-default icon scale
--- and SetIconScale has no portable, guaranteed getter on every Retail build.
+-- The native marker compositor is separate from the Minimap alpha tree. Keep
+-- its baseline unknown by default: some layouts use a non-default icon scale
+-- and SetIconScale has no portable getter. Only an explicitly selected
+-- experimental mode may opt into the documented 100% fallback.
 local nativeMarkerHostScale
+local nativeMarkerBaselineAssumed = false
 local nativeMarkerMode
 local nativeMarkerAlpha = 1
 local nativeMarkerGuard = false
 local nativeMarkerHooked = false
 local nativeMarkerAuditAt = 0
 local nativeMarkerRestorePending = false
+-- Quest areas are rendered by a separate native blob-ring compositor. They
+-- do not obey Minimap alpha or SetIconScale, so keep an independent, guarded
+-- alpha lease for the three related Blizzard ring surfaces.
+local nativeRingHostAlpha = {}
+local nativeRingAppliedAlpha = {}
+local nativeRingBaselineAssumed = {}
+local nativeRingHooked = {}
+local nativeRingGuard = false
+local nativeRingAuditAt = 0
+local nativeRingRestorePending = false
+
+local NATIVE_RING_ALPHA_SETTERS = {
+    "SetArchBlobRingAlpha",
+    "SetQuestBlobRingAlpha",
+    "SetTaskBlobRingAlpha",
+}
 
 ns.MINIMAP_NATIVE_MARKER_MODES = {
     keep = "Leave unchanged",
@@ -229,6 +250,28 @@ local function AddSemanticFrame(result, frame, minimap)
     result[frame] = true
 end
 
+local function AddAlphaEscapingDescendants(result, root, minimap)
+    -- Super Tracking owns a small, UIParent-level directional presentation.
+    -- Its individual native regions can opt out of their root's alpha, so a
+    -- root-only lease leaves the clamped quest-direction arc visible when the
+    -- Minimap rests at zero. Walk only this known, narrow tree and claim those
+    -- explicit alpha escapees; normal children still inherit the root once.
+    local queue, seen, index = VisualChildren(root), {}, 1
+    while index <= #queue and index <= 96 do
+        local child = queue[index]
+        index = index + 1
+        if child and not seen[child] then
+            seen[child] = true
+            if Method(child, "IsIgnoringParentAlpha") == true then
+                AddSemanticFrame(result, child, minimap)
+            end
+            for _, nested in ipairs(VisualChildren(child)) do
+                if not seen[nested] then queue[#queue + 1] = nested end
+            end
+        end
+    end
+end
+
 local function AddSemanticMinimapFrames(result, minimap)
     AddEUIFlyoutPanels(result, minimap)
 
@@ -256,8 +299,12 @@ local function AddSemanticMinimapFrames(result, minimap)
     -- than a Minimap child. It belongs to the same visual stack but must not
     -- enlarge the minimap's mouseover hit area if Blizzard gives it a broad
     -- layout rectangle.
-    AddSemanticFrame(result, _G.SuperTrackedFrame, minimap)
-    if _G.SuperTrackedFrame then hoverExcluded[_G.SuperTrackedFrame] = true end
+    local superTracked = _G.SuperTrackedFrame
+    AddSemanticFrame(result, superTracked, minimap)
+    if superTracked then
+        hoverExcluded[superTracked] = true
+        AddAlphaEscapingDescendants(result, superTracked, minimap)
+    end
 
     -- LibDBIcon is the canonical registry for third-party minimap buttons.
     -- Querying its object table is both cheaper and more accurate than guessing
@@ -332,11 +379,27 @@ local function ReadNativeMarkerScale(minimap)
     return ValidScale(value) and value or nil
 end
 
-local function CaptureNativeMarkerHostScale(minimap)
+local function CaptureNativeMarkerHostScale(minimap, allowAssumedDefault)
     if nativeMarkerHostScale ~= nil then return nativeMarkerHostScale end
     local value = ReadNativeMarkerScale(minimap)
-    if value ~= nil then nativeMarkerHostScale = value end
+    if value ~= nil then
+        nativeMarkerHostScale = value
+        nativeMarkerBaselineAssumed = false
+    elseif allowAssumedDefault then
+        -- Some Retail builds expose only SetIconScale. Selecting an
+        -- experimental marker mode is the user's explicit opt-in to use the
+        -- native 100% scale as the temporary restoration baseline. The
+        -- default "Leave unchanged" mode never reaches this path.
+        nativeMarkerHostScale = 1
+        nativeMarkerBaselineAssumed = true
+    end
     return nativeMarkerHostScale
+end
+
+local function HasNativeMarkerSetter(minimap)
+    if not minimap then return false end
+    local ok, setter = pcall(function() return minimap.SetIconScale end)
+    return ok and type(setter) == "function"
 end
 
 local function SetNativeMarkerScale(minimap, value)
@@ -349,11 +412,115 @@ local function SetNativeMarkerScale(minimap, value)
     return ok
 end
 
+local function NativeRingGetterName(setterName)
+    return "Get" .. setterName:sub(4)
+end
+
+local function CaptureNativeRingHostAlpha(minimap, setterName, allowAssumedDefault)
+    local known = nativeRingHostAlpha[setterName]
+    if known ~= nil then return known end
+    local value = Method(minimap, NativeRingGetterName(setterName))
+    if ValidAlpha(value) then
+        nativeRingHostAlpha[setterName] = value
+        nativeRingBaselineAssumed[setterName] = nil
+    elseif allowAssumedDefault then
+        -- These APIs do not consistently provide getters. Experimental marker
+        -- modes use the same explicit 100% fallback as SetIconScale until the
+        -- host announces a real ring alpha through its setter.
+        nativeRingHostAlpha[setterName] = 1
+        nativeRingBaselineAssumed[setterName] = true
+    end
+    return nativeRingHostAlpha[setterName]
+end
+
+local function SetNativeRingAlpha(minimap, setterName, value)
+    if not minimap or not ValidAlpha(value) then return false end
+    local okMethod, setter = pcall(function() return minimap[setterName] end)
+    if not okMethod or type(setter) ~= "function" then return false end
+    nativeRingGuard = true
+    local ok = pcall(setter, minimap, value)
+    nativeRingGuard = false
+    return ok
+end
+
+local function NativeRingWanted(hostAlpha, alpha, mode)
+    if mode == "scale" then return hostAlpha * alpha end
+    if mode == "hide_zero" then return alpha <= 0.001 and 0 or hostAlpha end
+end
+
+local function HookNativeMarkerRings(minimap)
+    if not minimap or type(hooksecurefunc) ~= "function" then return end
+    for _, setterName in ipairs(NATIVE_RING_ALPHA_SETTERS) do
+        if not nativeRingHooked[setterName] then
+            local ok = pcall(hooksecurefunc, minimap, setterName, function(_, value)
+                if nativeRingGuard or not ValidAlpha(value) then return end
+                nativeRingHostAlpha[setterName] = value
+                nativeRingBaselineAssumed[setterName] = nil
+                nativeRingAppliedAlpha[setterName] = value
+                nativeRingRestorePending = false
+                local wanted = NativeRingWanted(value, nativeMarkerAlpha, nativeMarkerMode)
+                if wanted ~= nil and math.abs(value - wanted) > 0.001
+                    and SetNativeRingAlpha(minimap, setterName, wanted) then
+                    nativeRingAppliedAlpha[setterName] = wanted
+                    nativeRingAuditAt = GetTime()
+                end
+            end)
+            if ok then nativeRingHooked[setterName] = true end
+        end
+    end
+end
+
+local function RestoreNativeMarkerRings(minimap)
+    if next(nativeRingAppliedAlpha) == nil then
+        nativeRingRestorePending = false
+        nativeRingAuditAt = 0
+        return true
+    end
+    local complete = true
+    for setterName, applied in pairs(nativeRingAppliedAlpha) do
+        local restore = CaptureNativeRingHostAlpha(minimap, setterName)
+        if restore == nil then
+            complete = false
+        elseif math.abs(applied - restore) > 0.001 and not SetNativeRingAlpha(minimap, setterName, restore) then
+            complete = false
+        else
+            nativeRingAppliedAlpha[setterName] = nil
+        end
+    end
+    nativeRingRestorePending = not complete
+    if complete then nativeRingAuditAt = 0 end
+    return complete
+end
+
+local function UpdateNativeMarkerRings(minimap, alpha, mode)
+    if mode ~= "hide_zero" and mode ~= "scale" then
+        RestoreNativeMarkerRings(minimap)
+        return
+    end
+    HookNativeMarkerRings(minimap)
+    local now = GetTime()
+    for _, setterName in ipairs(NATIVE_RING_ALPHA_SETTERS) do
+        local hostAlpha = CaptureNativeRingHostAlpha(minimap, setterName, true)
+        local wanted = hostAlpha and NativeRingWanted(hostAlpha, alpha, mode)
+        local applied = nativeRingAppliedAlpha[setterName]
+        -- Native map rebuilds can restore a blob ring without calling its Lua
+        -- setter. Reassert only while a fully faded Minimap needs it hidden.
+        local auditDue = wanted and wanted <= 0.001 and now - nativeRingAuditAt >= 0.25
+        if wanted ~= nil and (auditDue or applied == nil or math.abs(applied - wanted) > 0.001)
+            and SetNativeRingAlpha(minimap, setterName, wanted) then
+            nativeRingAppliedAlpha[setterName] = wanted
+            nativeRingAuditAt = now
+        end
+    end
+    nativeRingRestorePending = false
+end
+
 local function HookNativeMarkers(minimap)
     if nativeMarkerHooked or not minimap or type(hooksecurefunc) ~= "function" then return end
     local ok = pcall(hooksecurefunc, minimap, "SetIconScale", function(_, value)
         if nativeMarkerGuard or not ValidScale(value) then return end
         nativeMarkerHostScale = value
+        nativeMarkerBaselineAssumed = false
         nativeMarkerScale = value
         nativeMarkerRestorePending = false
         local wanted
@@ -423,11 +590,10 @@ local function UpdateNativeMarkers(minimap, alpha, mode)
         return
     end
     HookNativeMarkers(minimap)
-    local hostScale = CaptureNativeMarkerHostScale(minimap)
+    local hostScale = CaptureNativeMarkerHostScale(minimap, true)
     if hostScale == nil then
-        -- A safe baseline is required before changing the compositor.  This
-        -- avoids changing a host's non-default icon scale merely because its
-        -- API did not offer a readable value at the moment we enabled PF.
+        -- The setter itself is unavailable or rejected. Keep the requested
+        -- mode recorded, but do not claim that a visual change was applied.
         nativeMarkerMode = mode
         nativeMarkerAlpha = alpha
         nativeMarkerWanted = nil
@@ -452,19 +618,32 @@ local function UpdateNativeMarkers(minimap, alpha, mode)
     end
 end
 
-function ns:GetMinimapNativeMarkerAvailability()
+function ns:GetMinimapNativeMarkerAvailability(mode)
     local minimap = _G.Minimap
     if not minimap then return false, "The native Minimap is not available." end
+    if not HasNativeMarkerSetter(minimap) then
+        return false, "This WoW build does not expose native marker scaling."
+    end
     -- Install the read-only post-hook even while leaving markers unchanged. If
     -- Blizzard or the owning UI later announces a scale, experimental modes
     -- can become available without guessing or requiring a reload.
     HookNativeMarkers(minimap)
-    if CaptureNativeMarkerHostScale(minimap) ~= nil then return true end
-    return false, "This WoW build does not expose the current native marker scale. Frame Gambit will not assume 100% and risk restoring the wrong host value."
+    if CaptureNativeMarkerHostScale(minimap) ~= nil then
+        if nativeMarkerBaselineAssumed then
+            return true, "This WoW build cannot read the current native marker scale. Because an experimental marker mode is selected, Frame Gambit is using 100% as its restoration baseline until Blizzard or the owning UI announces another value."
+        end
+        return true
+    end
+    local note = "This WoW build cannot read the current native marker scale. Choosing an experimental marker mode will explicitly use 100% as its restoration baseline; Leave unchanged never writes it."
+    if mode == "hide_zero" or mode == "scale" then
+        CaptureNativeMarkerHostScale(minimap, true)
+    end
+    return true, note
 end
 
 function ns:HasMinimapStackPendingWork()
-    return nativeMarkerRestorePending == true or scan ~= nil or next(pending) ~= nil
+    return nativeMarkerRestorePending == true or nativeRingRestorePending == true
+        or scan ~= nil or next(pending) ~= nil
 end
 
 function ns:UpdateMinimapStack(rescan)
@@ -480,10 +659,13 @@ function ns:UpdateMinimapStack(rescan)
         multiplier = 1
         scan = nil
         RestoreNativeMarkers(minimap or _G.Minimap)
+        RestoreNativeMarkerRings(minimap or _G.Minimap)
         return
     end
     local settings = self.GetTargetSettings and self:GetTargetSettings("minimap")
-    UpdateNativeMarkers(minimap, nextMultiplier, settings and settings.nativeMarkerMode or "keep")
+    local markerMode = settings and settings.nativeMarkerMode or "keep"
+    UpdateNativeMarkers(minimap, nextMultiplier, markerMode)
+    UpdateNativeMarkerRings(minimap, nextMultiplier, markerMode)
     local changed = math.abs(multiplier - nextMultiplier) > 0.001
     multiplier = nextMultiplier
     if rescan and not scan then BeginScan(minimap) end
@@ -544,3 +726,4 @@ function ns:MinimapStackContainsCursor()
     end
     return false
 end
+

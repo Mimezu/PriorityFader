@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.4 seconds
+Output:
 # Frame Gambit Retail validation
 
 Run this with Ellesmere enabled on a character that can enter and leave combat.
@@ -8,73 +11,127 @@ active profile, graph consistency, and currently unavailable adapters.
 
 1. Open Frame Gambit and confirm Help shows a small teal notification before
    completing the tour.
-2. Open Help and switch through every topic. No frame setting should change.
-3. Start the tutorial on a profile with no managed targets. Complete the
-   practice-frame Manage, Mouseover, priority, and Otherwise actions. They
-   must gate Next without creating or changing a real target.
-4. Test Back, Next, Skip, the close button, and Escape; every exit must remove
-   the highlight and leave the editor usable. Clicking real Pick or Peek while
-   the tour is open must cancel cleanly and must not strand an overlay.
-5. On the priority step, select Quiet, Combat, Hover, and Both. Swap the first
-   two rows and confirm the displayed winner changes only for Both.
-6. Close and reopen the editor mid-tour. No tutorial overlay may remain.
-   Also click Help during the tour: the coach must close, Help must open above
-   the editor, and Resume must return to the saved step.
-7. Enter combat during the priority-board step. The tutorial card and outline
-   must disappear, accept no clicks, and resume at the same step after combat.
+2. Open Help and switch through every topic. Confirm it is a centered,
+   draggable standalone window with Resonance's topic rail, responsive scale,
+   and Escape-close behavior. Close the editor while Help is open; Help must
+   close with it. No frame setting should change.
+3. Start the tutorial on a profile with no managed targets. A temporary
+   portrait **Tutorial Frame** must appear at top-left and be pinned first in
+   the real target rail. Complete Select, **Use this frame**, Stationary 30%,
+   Mouseover 100%, row priority, and Otherwise with the real editor controls.
+4. Each step must spotlight only its real control (and the temporary frame)
+   while the rest of the UI is dimmed. The tutorial card and Tutorial Frame
+   must remain readable and clickable above that dim layer.
+5. On the priority step, hover while Stationary is first: the Tutorial Frame
+   stays dim. Move Mouseover upward with the real `^` control, then hover it
+   again: it reveals. Next must require both observations.
+6. Test Back, Next, Skip, close, Escape, Help, Pick, Peek, closing the editor,
+   and `/reload` mid-tour. Each interruption must clear the spotlight and
+   remove the Tutorial Frame, its session target, and its rules. Resume may
+   recreate only the lesson prerequisites; existing profile data stays intact.
+7. Enter combat during the priority step. The tutorial card and spotlight must
+   disappear, accept no clicks, and resume at the same step after combat.
 8. Finish the tour and confirm the Help notification clears. Restart it, then
    abort; completion and the cleared notification must be preserved.
 9. Run the tour for more than 2.5 seconds while Cinematic is active. Its card
-   and outline must remain fully visible through Cinematic root rescans.
+   and temporary frame must remain fully visible through Cinematic root scans.
 10. Resize the editor to 760x500. The subtitle must stop before Help, and the
-   compact tutorial must dock without drawing a highlight beneath its card.
+   compact tutorial must dock without drawing a highlight or dim layer.
 11. Compare the active profile before and after. Targets, reactions,
    relationships, timing, and opacity must remain unchanged.
 
 ## Cinematic letterbox
 
-1. Open Cinematic options, enable Black bars, and drag Bar height from 4% to
+1. Open Cinematic options, enable Black bars, and drag Bar height from 0% to
    25%. While Cinematic is off the saved height must change without showing
    either bar.
-2. Enable Cinematic and verify equal opaque black bars appear at the top and
-   bottom, remain mouse-transparent, and resize live with the height slider.
+2. At 0%, enable Cinematic and verify neither bar is shown. At any positive
+   height, verify equal opaque black bars appear at the top and bottom, remain
+   mouse-transparent, and resize live with the height slider.
 3. Change UI scale or window resolution, then disable Cinematic. The bars must
    resize proportionally and disappear immediately without affecting any
    Blizzard, Ellesmere, OPie, DialogueUI, or other addon frame.
-4. Reset Cinematic defaults and verify the letterbox returns to Off at 10%.
+4. Reset Cinematic defaults and verify the letterbox returns to Off at 4%.
+5. With cinematic bars enabled, verify EUI Data Bars and XIV Databar remain
+   visible above the bars, while world-space nameplates and unit names behind
+   the bar are covered. Neither data-bar addon should have any changed frame
+   settings or lost interaction.
+6. Open the Character panel and EllesmereUI Bags, then enable Cinematic. Both
+   panels must close with the other game windows so they cannot retain mouse
+   input while invisible. While Cinematic remains active, reopen Character,
+   Bags, and `/res`: each must be visible and usable above the scene, then
+   return to the blackout when closed.
+7. While Cinematic remains active, open the World Map and switch between a
+   continent, zone, dungeon, and Delve map. The map must remain visible and
+   usable above the scene throughout, without turning Cinematic off.
+8. Press the orange Cinematic header button. The main editor must stay open,
+   gain its orange border, default the target rail to **Managed**, and show a
+   separate inline Cinematic strip without covering the subtitle or Presence
+   panel. Managed dots and live-state accents must be orange; unavailable
+   target dots and warning/confirm states must be red. Use the strip's
+   `Turn off` button to return to the previous profile without closing the
+   editor. Slash/keybinding activation still closes the editor with other game
+   panels.
 
 ## Out of combat
 
-1. Open **Choose frame** and watch the one-time `Mapping visible UI` pass. FPS
+1. Add a **Form** reaction, select a form for the current class/spec, and
+   verify **Yes** matches only while it is active and **No** only while it is
+   inactive. Choose a form for another class/spec: its row must be visibly
+   muted and must never match, including when set to No.
+2. Turn a matching row **Off**. It must remain in place with its picker choice,
+   opacity, requirements, and priority intact, become muted, and be skipped.
+   Turn it On and confirm the original behavior returns.
+3. Add two **Movement** cards. Each must show the same clear Yes/No segment;
+   Yes matches only while moving and No only while stationary. Reorder them,
+   then add a second Form card and confirm each configurable card keeps its
+   own picker value and Boolean answer.
+4. Add a **Spec** card. Its picker must ask for class first, then spec. Choose
+   the current class/spec and confirm it matches; choose another spec in the
+   class and confirm it is greyed when unmatched; choose another class and
+   confirm it is retained, dimmed, and skipped. Add a second Spec card to
+   verify the two rows remain independent and reorder normally.
+5. On a character or effect that WoW reports as stealthed/invisible, verify
+   **Stealthed / invisible** reacts immediately on entering and leaving it.
+   Start and cancel Fishing to verify **Fishing** follows the player channel.
+   Enter and complete a Delve to verify **In Delve** remains active through
+   the run and turns off outside it.
+6. Add a **Class pet active** reaction to a disposable target. Summon and
+   dismiss a combat/class pet; only the first action must reveal the target.
+   A cosmetic companion must not satisfy this condition.
+7. Add a **Cosmetic companion active** reaction to a separate disposable
+   target. Summon and dismiss a Pet Journal companion; only the first action
+   must reveal that target. A combat/class pet must not satisfy it.
+8. Open **Choose frame** and watch the one-time `Mapping visible UI` pass. FPS
    should recover immediately when mapping completes; remaining in the picker
    must not cause a sustained drop. Muted wireframes should cover Details,
    visible EUI bars, aura/cooldown viewers, chat, and Minimap regions.
-2. Move over overlapping wireframes. Mouse wheel must cycle a stable stack and
+9. Move over overlapping wireframes. Mouse wheel must cycle a stable stack and
    the teal box/title must distinguish an inner frame from the whole window.
    Confirm one named child and one named parent as separate targets. **Choose
    again** / Escape must return cleanly.
-3. Open and cancel the picker twenty times. Its wireframe pool must remain
+10. Open and cancel the picker twenty times. Its wireframe pool must remain
    bounded and no UI frame may change alpha, parent, level, mouse state, or
    scripts merely because it was inspected.
-4. Use **Discover visible UI**. It should add visible top-level addon roots in
+11. Use **Discover visible UI**. It should add visible top-level addon roots in
    one pass without enabling or fading them. Secret MiniAuras geometry must be
    skipped without a BugSack error.
    Add one disposable named and one anonymous session frame, then use **Remove
    from list**. The first click must only arm confirmation; the second removes
    the catalog entry and every profile relationship. Built-in targets must not
    offer this action.
-5. Filter for a supported frame, select it, and choose **Use this frame**.
+12. Filter for a supported frame, select it, and choose **Use this frame**.
    Confirm Mouseover and In combat start above Otherwise.
-6. Add two reactions with different opacity, drag one by its `::` handle past
+13. Add two reactions with different opacity, drag one by its `::` handle past
    the other, and confirm the first matching row is now the intended rule.
-7. Create a hover group and a parent→child link. Use **Preview frames** to
-   confirm the teal/lavender/amber outlines match the direct relationships.
-8. Create, switch, export, import, and delete a disposable profile. The import
+14. Create a hover group and a parent→child link. Use **Preview frames** to
+   confirm the teal/lavender/red outlines match the direct relationships.
+15. Create, switch, export, import, and delete a disposable profile. The import
    must create a new profile and leave the original untouched.
-9. Select a configured frame and press Copy. Select another frame; Paste must
+16. Select a configured frame and press Copy. Select another frame; Paste must
    light only while the internal rule copy is valid. Paste it and verify fresh
    reaction IDs, identical order/timing/opacities, and no copied relationships.
-10. Switch the target rail between List and Tree. Link an unmanaged child by
+17. Switch the target rail between List and Tree. Link an unmanaged child by
     dragging it onto a managed parent: it must become an indented clean follower
     with no starter rows shadowing inheritance. Add a local child rule and
     verify it wins when matched, then falls back to the parent's result. Reject
@@ -131,10 +188,10 @@ active profile, graph consistency, and currently unavailable adapters.
    enabled. Toggling in combat must refuse without entering a partial scene.
    Enter combat while cinematic is active and verify alpha-only transitions
    continue without protected-action errors.
-6. In the Cinematic page, change a component mode, fine-tune it in Advanced
-   rules, then return to the page. It must show `Custom rules` and require a
-   second click before replacing that fine-tuning. Test Reset defaults, close
-   the page, reopen it, and verify Reset requires confirmation again.
+6. Enter Cinematic from the orange header button. The normal editor must be
+   the only place to edit targets and ordered rules; no dedicated Cinematic
+   page or duplicate quick-mode rows may appear. Its inline strip must expose
+   Cinematic: On, Shortcut, and Black bars only.
 7. Assign a temporary Cinematic shortcut, test it, then clear it. Also assign
    a key already used by another command and verify the explicit confirmation;
    entering combat during key capture must cancel without changing bindings.
@@ -145,22 +202,18 @@ active profile, graph consistency, and currently unavailable adapters.
 
 ## Cinematic editor identity
 
-1. Open the Cinematic page while the mode is off. Its title, outer editor
-   border, main Cinematic button, and toggle must use the warm amber identity.
-2. Click Fine-tune profile while off. Cinematic must turn on and the ordered
-   editor must show `Editing: Cinematic` with the restrained amber mode cues.
-3. Use Back to editor from the dedicated page and the Cinematic button from
-   the fine-tuning editor. Neither route may open or mutate another profile.
-4. Turn Cinematic off and return to a normal profile. The editor returns to
-   Resonance lavender while the Cinematic entry button remains orange.
-5. Confirm that ordinary target rows, reaction controls, and action buttons
-   remain lavender while fine-tuning Cinematic. Only Cinematic controls, the
-   live profile cue, subtitle, and outer editor border should use warm amber.
-6. On the dedicated page, move the pointer across every quick-mode button.
-   No button may remain filled teal after the pointer leaves it.
-7. Verify Cast Bar defaults to Casting only and Resource Bars defaults to
-   Combat only. Both must remain editable through their quick-mode menus and
-   the ordered-rule editor.
+1. Click the orange Cinematic header button while the mode is off. It must
+   enter the normal editor on `Editing: Cinematic`, show the inline controls,
+   and apply the restrained amber outer-border identity.
+2. Confirm ordinary target rows, reaction controls, and action buttons remain
+   lavender. Only the live profile cue, subtitle, outer editor border, and
+   Cinematic strip should use warm amber.
+3. Use the inline `Cinematic: On` button to return to a normal profile. The
+   editor remains open and returns to Resonance lavender.
+4. Re-enter Cinematic, set a shortcut and black-bar height in the strip, then
+   reload. Both values must persist; no dedicated Cinematic page may appear.
+5. Verify Cast Bar defaults to Casting only and Resource Bars defaults to
+   Combat only. Both remain editable through the ordered-rule editor.
 
 ## Availability and coexistence
 
@@ -232,8 +285,10 @@ active profile, graph consistency, and currently unavailable adapters.
 4. Cycle the experimental native-marker control through Leave unchanged, Hide
    at 0%, and Scale with map. Verify Blizzard service/quest markers remain
    unchanged in the first mode, disappear only at full rest in the second,
-   and shrink with the fade in the third. Reset/remove Minimap and verify
-   standard marker scale returns. Tracking categories must remain unchanged.
+   and shrink with the fade in the third. Quest, archaeology, and task-area
+   rings must follow the same behavior. Reset/remove Minimap and verify
+   standard marker scale and ring alpha return. Tracking categories must
+   remain unchanged.
 5. While Hide at 0% is resting, change zones, change the tracked objective,
    and open/close the map to force native marker rebuilds. No service, quest,
    portal, or tracked-item marker may reappear and remain visible.
@@ -242,10 +297,38 @@ active profile, graph consistency, and currently unavailable adapters.
    release during combat and verify restoration retries after combat.
 7. Export and re-import a profile using each marker mode. The mode must survive;
    an older export without marker metadata must still import as Leave unchanged.
-8. On a client with no readable native icon-scale getter, verify the editor says
-   Markers: unavailable and explains why. It must not write or restore an
-   assumed 100% scale. If another UI later calls SetIconScale, reopen the editor
-   and verify the controls become available using that captured host value.
+8. On a client with no readable native icon-scale getter, verify Leave unchanged
+   performs no marker-scale write. Selecting either experimental mode must show
+   the 100% fallback notice and make marker fading functional. If another UI
+   later calls SetIconScale, verify that announced value replaces the assumed
+   restoration baseline.
+9. Reset Cinematic Mode and verify its Minimap target defaults to Hide at 0%.
+   At rest, both the map and native service/quest markers must disappear. Change
+   the Cinematic Minimap to Scale with map, reload, and verify migration keeps
+   that explicit choice instead of replacing it.
+10. Super-track a quest far enough away to clamp its directional indicator to
+    the screen edge. At 0%, its blue quest-direction arc must disappear with
+    the Minimap; it must return at the host's prior opacity when the Minimap is
+    revealed, reset, or released.
+
+## Normal evaluator performance
+
+1. With Cinematic Mode off, configure several normal targets and include rules
+   from target, movement, casting, travel, group/instance, and world categories.
+   Verify each condition still changes opacity and ordered first-match behavior
+   remains unchanged.
+2. Let a managed frame settle, then make its owning addon repaint `SetAlpha`.
+   Frame Gambit must immediately reapply its owned opacity and later restore the
+   host's newest value when the target is reset or the profile changes.
+3. Enter combat before a newly created or pooled target can receive its alpha
+   post-hook. The fallback audit must reacquire the host value and enforce the
+   configured opacity without Lua errors; leaving combat must install the hook.
+4. Compare addon CPU with a representative 10-20 target profile before and
+   after this build. Normal fading should remain smooth at 20 Hz while idle
+   `GetAlpha` reads and unrelated game-state API calls are materially reduced.
+5. Switch to an empty profile and close the editor. The shared evaluator should
+   sleep until an event, target mutation, profile switch, or pending restore
+   gives it work again.
 
 ## Ellesmere Chat
 
@@ -270,3 +353,4 @@ active profile, graph consistency, and currently unavailable adapters.
    priority without moving, restyling, or changing clicks on the unit frame.
 3. Disable Cinematic/remove the Player target. EUI's latest requested wrapper
    alpha must be restored rather than a hardcoded 100%.
+

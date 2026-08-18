@@ -1,7 +1,112 @@
+Exit code: 0
+Wall time: 0.4 seconds
+Output:
 # Frame Gambit changelog
 
 ## Unreleased
 
+## 2.6.0 - Cinematic editor and expanded gambits
+
+- Opening the World Map during Cinematic Mode now keeps every map view visible
+  above the scene while Cinematic remains active.
+- Adds `/fg` as the shortest slash alias for opening Frame Gambit.
+- Adds a configurable **Form** reaction with a dense form picker and Yes/No
+  state choice. Forms unavailable to the current class/spec are retained,
+  muted, and skipped, enabling one profile to safely cover several specs.
+  Supported entries are Druid forms, Shadowform, Ghost Wolf, and Demon Hunter
+  Metamorphosis, including Devourer Void Metamorphosis.
+- Establishes the reusable picker-card Boolean pattern: a two-part **Yes / No**
+  control with the selected answer filled. The new **Movement** card uses it
+  directly (Yes = moving; No = stationary); old Moving/Stationary rows remain
+  supported in saved and imported profiles.
+- Adds a repeatable **Spec** picker card. It asks for class first and then a
+  spec, preserves other-class rows for shared profiles, and safely skips those
+  rows until they apply to the current character.
+- Adds **Stealthed / invisible**, **Fishing**, and **In Delve** conditions.
+  Stealth refreshes only on player aura changes; fishing uses the player’s
+  active Fishing channel; Delves use the supported party-state API.
+- Adds an **On/Off** switch to every reaction row. Disabled rows retain their
+  ordered configuration, are visibly greyed out, and are skipped by the
+  evaluator. Form choice and row-enabled state round-trip through profile
+  export/import.
+- Added two precise pet conditions: **Class pet active** (the player's combat
+  pet unit) and **Cosmetic companion active** (a summoned Pet Journal
+  companion). They remain deliberately separate; there is no ambiguous
+  "any pet" condition.
+- Reflowed the live Cinematic strip into its own header row, so scene toggle,
+  black bars, and shortcut controls no longer overlap the editor header or
+  Presence panel. Entering Cinematic from the editor keeps it visibly open and
+  starts the target rail on **Managed** frames.
+- Cinematic editing now remaps the normal teal live-state cue to Cinematic
+  orange across the editor. Unavailable and confirm-before-changing states use
+  red addon-wide, keeping orange exclusive to Cinematic.
+- Enabled reactions now remain fully legible and editable when they are not
+  the currently matching row. Only a deliberately disabled **Off** reaction
+  is greyed out. The header Cinematic control also becomes **Exit scene**
+  while active, providing a second reliable way to return to the prior profile
+  without closing the editor.
+- The guided-tutorial card now stays above the live editor after each required
+  click. On wide screens it docks in the free left column, leaving the real
+  highlighted target or control unobstructed.
+- Tutorial highlighting now always uses a small real control or rule row. It
+  no longer falls back to an oversized editor-panel rectangle after a required
+  click changes the editor contents. Reaction On/Off is now beside its drag
+  handle, clearly separating row state from the condition's value controls.
+- During the guided Mouseover lesson, the palette opens directly on Presence
+  and highlights **Mouseover**; after selection, the focus moves to its real
+  opacity control for the 100% choice.
+- The tutorial now seeds **Otherwise** at 100% beside its 30% Stationary rule,
+  so moving immediately demonstrates a visible first-match fallback change.
+- Rebuilt the guided tutorial around a visible, session-only **Tutorial
+  Frame** with the player's portrait. It is pinned to the real target rail and
+  teaches actual selection, management, reaction creation, first-match
+  priority, row movement, and Otherwise editing under a focused dim overlay;
+  the target and its rules are removed automatically on every exit.
+- Removed the dedicated Cinematic page. The orange Cinematic control now
+  enters the live Cinematic profile directly in the main editor; its inline
+  strip keeps the Cinematic On/Off toggle, black bars, and shortcut together.
+- Removed the developer-facing `Run audit` action from Help. The read-only
+  diagnostic remains available by `/pfader audit` when troubleshooting calls
+  for it.
+- Simplified the Cinematic page into scene-wide controls only. Frame
+  visibility now has one source of truth: **Edit Cinematic profile** and the
+  familiar ordered-rule editor; the duplicate quick-mode rows are gone.
+- Removed the redundant Cinematic `Keep a frame` shortcut and its opaque
+  exception count. Existing saved keeps are cleared once; use **Edit Cinematic
+  profile** to add any custom frame through the normal, visible rules.
+- Cinematic's dedicated toggle now leaves the Frame Gambit editor open for
+  live scene setup, while slash/keybinding activation continues closing it with
+  other game panels.
+- Minimap `Hide at 0%` and `Scale with map` now also fade Super Tracking's
+  alpha-escaping quest-direction arc when it is clamped to the screen edge.
+- Fixed Cinematic's temporary panel exception for `HIGH`-strata windows, so
+  EllesmereUI Bags and themed Character panels can appear above the scene when
+  opened without disabling Cinematic Mode.
+- Rebuilt Frame Gambit's Help & tutorial around the shared Resonance-style
+  standalone window: a toggleable `? Help` control, centered draggable layout,
+  topic rail, Escape close behavior, and retained tutorial/audit actions.
+- Cinematic now closes Blizzard game panels as it starts, preventing invisible
+  windows from retaining mouse input. Panels opened afterward, including
+  supported top-level addon windows, remain visible above the scene until
+  closed without leaving Cinematic Mode.
+- Cinematic black bars now allow 0% through 25% (default 4%). At 0%, no
+  letterbox is drawn. EllesmereUI Data Bars and XIV Databar remain visible
+  above the bars without Frame Gambit changing either addon's frames, while
+  world-space names and nameplates remain behind the letterbox.
+- Minimap `Hide at 0%` and `Scale with map` now include Blizzard's separate
+  quest, archaeology, and task-area rings, which do not follow icon scale.
+- Fixed a regression that made experimental native Minimap marker modes
+  unavailable on Retail clients exposing `SetIconScale` without a matching
+  getter. Selecting a mode is now the explicit opt-in to its documented
+  restoration fallback; the default remains untouched.
+- Cinematic Mode now defaults its Minimap to `Hide at 0%`, so Blizzard's
+  engine-drawn service and quest markers disappear with a fully faded map.
+  Existing Cinematic profiles using the old unchanged default are upgraded;
+  an intentional `Scale with map` choice is preserved.
+- Reduced normal-profile evaluator work: Frame Gambit now queries only states
+  referenced by enabled gambits and relies on its guarded alpha post-hooks,
+  with a low-rate safety audit, instead of polling every managed frame's alpha
+  and every supported game state at 20 Hz.
 - Added a compact Help Center with focused guides for Gambits, relationships,
   Cinematic Mode, safety, and troubleshooting.
 - Added a reusable, non-destructive guided tutorial for the complete
@@ -12,7 +117,7 @@
 - Added safe tutorial persistence, combat pause/resume, contextual highlights,
   and a Help notification until the tour is completed.
 - Added optional mouse-transparent Cinematic letterbox bars. Their shared
-  height is adjustable from 4% to 25% of the screen and adapts to resolution
+  height is adjustable from 0% to 25% of the screen and adapts to resolution
   or UI-scale changes without modifying any Blizzard or addon frame.
 - Added an experimental Minimap native-marker control with `Leave unchanged`,
   `Hide at 0%`, and `Scale with map` modes. It uses the Minimap compositor's
@@ -22,10 +127,10 @@
 - Native minimap marker composition now captures and restores the host's real
   icon scale instead of assuming 100%, accepts host scales above 1, and keeps
   failed restorations pending until they can complete safely.
-- On clients where native marker scale is write-only, those experimental modes
-  now show as unavailable instead of silently guessing 100% or appearing active
-  while doing nothing. They become available if the owning UI announces a
-  trustworthy scale later.
+- On clients where native marker scale is write-only, `Leave unchanged` remains
+  completely non-invasive. Explicitly selecting an experimental marker mode
+  uses a clearly disclosed 100% restoration baseline until Blizzard or the
+  owning UI announces its real scale, preserving functional marker fading.
 - Minimap native-marker mode now survives profile export/import through a
   backward-compatible optional record; older profile strings still import.
 - The existing Chat target now becomes a complete Ellesmere Chat visibility
@@ -454,3 +559,4 @@
 
 - Initial adapters, ordered opacity reactions, spotlight picker, grouping, and
   parent-to-child hover links.
+

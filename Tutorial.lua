@@ -1,7 +1,10 @@
+Exit code: 0
+Wall time: 0.4 seconds
+Output:
 local ADDON, ns = ...
 
--- A deliberately self-contained help layer.  It teaches the editor without
--- touching target settings, profiles, or another addon's frames.
+-- A self-contained coach layer. It teaches the real editor through one
+-- session-only Frame Gambit frame, never touching a player's existing UI.
 local C = ns.COLORS
 local WHITE = "Interface\\Buttons\\WHITE8X8"
 local TITLE = "GameFontNormalLarge"
@@ -104,6 +107,25 @@ local function ClearOutline()
     if outline then outline.pulse:Stop(); outline:Hide() end
 end
 
+local function CreateSpotlight()
+    if ns.TutorialSpotlight then return ns.TutorialSpotlight end
+    local spotlight = { frames = {} }
+    for index = 1, 4 do
+        local dim = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+        dim:SetFrameStrata("FULLSCREEN_DIALOG"); dim:SetFrameLevel(840); dim:EnableMouse(false)
+        Backdrop(dim, { 0, 0, 0, 0.68 }, { 0, 0, 0, 0 }); dim:Hide()
+        spotlight.frames[index] = dim
+    end
+    ns.TutorialSpotlight = spotlight
+    return spotlight
+end
+
+local function ClearSpotlight()
+    local spotlight = ns.TutorialSpotlight
+    if not spotlight then return end
+    for _, dim in ipairs(spotlight.frames or {}) do dim:Hide() end
+end
+
 local function SafeShown(frame)
     if not frame or not frame.IsShown then return false end
     local ok, shown = pcall(frame.IsShown, frame)
@@ -122,6 +144,20 @@ local function Highlight(frame)
     outline:SetSize(width + 6, height + 6); outline:Show(); outline.pulse:Play()
 end
 
+local function Spotlight(frame)
+    if not SafeShown(frame) or not ns.GetUsableFrameRect then ClearSpotlight(); return end
+    local left, bottom, width, height = ns:GetUsableFrameRect(frame)
+    if not left or not bottom or not width or not height or width < 2 or height < 2 then ClearSpotlight(); return end
+    local uiWidth, uiHeight = UIParent:GetSize()
+    local right, top = left + width, bottom + height
+    local dims = CreateSpotlight().frames
+    dims[1]:ClearAllPoints(); dims[1]:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, top); dims[1]:SetSize(uiWidth, math.max(0, uiHeight - top))
+    dims[2]:ClearAllPoints(); dims[2]:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, 0); dims[2]:SetSize(uiWidth, math.max(0, bottom))
+    dims[3]:ClearAllPoints(); dims[3]:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, bottom); dims[3]:SetSize(math.max(0, left), math.max(0, height))
+    dims[4]:ClearAllPoints(); dims[4]:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", right, bottom); dims[4]:SetSize(math.max(0, uiWidth - right), math.max(0, height))
+    for _, dim in ipairs(dims) do dim:Show() end
+end
+
 local function EnsureOptions()
     if ns.CreateOptions then ns:CreateOptions() end
     if ns.Options and not ns.Options:IsShown() then ns.Options:Show() end
@@ -134,85 +170,253 @@ local function FindControl(kind)
     if kind == "targets" then return panel.targets end
     if kind == "pick" then return panel.pickButton or panel.targets end
     if kind == "selected" then return panel.tutorialSelectedRow or panel.targets end
-    if kind == "center" then return panel.center end
-    if kind == "add" then return panel.addReactionButton or panel.center end
-    if kind == "otherwise" then return panel.otherwiseRow or panel.center end
+    if kind == "tutorial_target" then return panel.tutorialTargetRow or panel.targets end
+    if kind == "tutorial_use" then
+        -- Once the player has clicked Use this frame, that button is gone.
+        -- Continue with a small real-row focus instead of outlining the whole
+        -- workspace while they read the confirmation.
+        return panel.tutorialUseButton or (panel.reactionContent and panel.reactionContent._reactionRows or {})[1]
+    end
+    if kind == "tutorial_stationary" then
+        for _, row in ipairs(panel.reactionContent and panel.reactionContent._reactionRows or {}) do
+            if row._tutorialReaction and row._tutorialReaction.condition == "stationary" then return row end
+        end
+        return (panel.reactionContent and panel.reactionContent._reactionRows or {})[1]
+    end
+    if kind == "add" then
+        local rows = panel.reactionContent and panel.reactionContent._reactionRows or {}
+        -- While the card palette is open, show the learner exactly where
+        -- Mouseover lives. Once it is added, guide the second half of this
+        -- step by spotlighting that row's opacity control.
+        local palette = ns.ReactionPalette
+        if palette and palette:IsShown() then
+            for _, button in ipairs(palette.conditionButtons or {}) do
+                if button.conditionKey == "mouseover" and SafeShown(button) then return button end
+            end
+        end
+        for _, row in ipairs(rows) do
+            if row._tutorialReaction and row._tutorialReaction.condition == "mouseover" then return row.opacity end
+        end
+        return panel.addReactionButton
+    end
+    if kind == "tutorial_move" then
+        for _, row in ipairs(panel.reactionContent and panel.reactionContent._reactionRows or {}) do
+            if row._tutorialReaction and row._tutorialReaction.condition == "mouseover" then return row.up end
+        end
+        return nil
+    end
+    if kind == "otherwise" then return panel.otherwiseRow end
     if kind == "managed" then return panel.managedOnlyButton end
     if kind == "tree" then return panel.treeViewButton end
     if kind == "filter" then return panel.targetFilter end
     if kind == "outline" then return panel.outlineButton or (panel.selectionOutlineEnabled and ns.SelectionOutline) end
     if kind == "cinematic" then return panel.cinematic end
+    if kind == "tutorial_frame" then return ns.TutorialPracticeFrame end
     return nil
 end
 
 local STEPS = {
-    { title = "Welcome to Frame Gambit", body = "Choose a frame. Tell it when to appear. Ordered rules decide its opacity. This short practice does not change your UI.", focus = "targets" },
-    { title = "1. Choose and manage", body = "Try the practice frame below. In the real editor, Pick on screen and Discover visible UI find frames; the teal square means the profile manages one.", focus = "targets", practice = "select" },
-    { title = "2. Add a reaction", body = "Add Mouseover to the practice frame. A reaction says: when this is true, use this opacity. Combat, Casting, and more work the same way.", focus = "center", practice = "reaction" },
-    { title = "3. A gambit is priority", body = "Frame Gambit checks reactions from top to bottom. The first matching reaction wins. Try the board below.", focus = "center", board = true },
-    { title = "4. Otherwise is rest", body = "No reaction matched? Otherwise decides the quiet opacity. Try the practice value. A low value keeps the screen calm without hiding or restyling the frame.", focus = "otherwise", practice = "otherwise" },
-    { title = "5. See what you edit", body = "Frame outline marks the real frame you are editing. After the tour, Peek can collapse the editor while keeping that outline visible.", focus = "outline" },
-    { title = "6. Let frames work together", body = "Hover groups reveal together. Linked children reveal from a source. Visibility children can follow a parent. Cinematic is a separate, calm profile.", focus = "cinematic" },
-    { title = "You are ready", body = "Finish the tour, then use Pick on screen for a real frame. Start with Mouseover at 100% and Otherwise at 0–20%. Add Combat or Casting only when it helps.", focus = "pick", finish = true },
+    { title = "Welcome to Frame Gambit", body = "This is a real, temporary Tutorial Frame at the top-left of your screen. Nothing from this lesson is saved. We will manage it with the same editor you will use for your own UI.", focus = "tutorial_frame" },
+    { title = "1. Select the Tutorial Frame", body = "The temporary Tutorial Frame is pinned to the top of the real target list. Click its target row now.", focus = "tutorial_target" },
+    { title = "2. Manage it for real", body = "Click Use this frame. The editor will take over only this temporary frame's opacity; its layout and behavior remain untouched.", focus = "tutorial_use" },
+    { title = "3. Quiet at rest", body = "The lesson now gives the Tutorial Frame one real rule: Stationary → 30%. You are standing still, so it rests at 30%; Otherwise is 100%, so move for a moment to see the visible difference. This is a normal first-match reaction, not a fake preview.", focus = "tutorial_stationary" },
+    { title = "4. Add Mouseover → 100%", body = "Use the real + Add reaction button, choose Mouseover, then set its opacity to 100%. It will be added below Stationary on purpose.", focus = "add" },
+    { title = "5. Priority is the gambit", body = "Hover the Tutorial Frame. It still stays dim because both rules match and Stationary is first. Use the real ^ button to move Mouseover above Stationary, then hover the frame again to confirm it reveals.", focus = "tutorial_move" },
+    { title = "6. Otherwise is the fallback", body = "Use the real Otherwise opacity control and choose a value different from 100%. Otherwise applies only when no reaction above it matches.", focus = "otherwise" },
+    { title = "7. See what you edit", body = "Frame outline marks the real frame you are editing. Try it now. After the tour, Peek can collapse the editor while keeping that outline visible.", focus = "outline" },
+    { title = "You are ready", body = "You managed a real temporary frame, added a reaction, saw priority win, moved a row, and set Otherwise. Hover groups and linked children use the same ordered-rule idea; Cinematic is a separate profile. Finish to remove the Tutorial Frame and every lesson rule.", focus = "cinematic", finish = true },
 }
 
 local function CanAdvance(tutorial)
-    if tutorial.step == 2 then return tutorial.practiceSelected == true, "Manage the practice frame first." end
-    if tutorial.step == 3 then return tutorial.practiceReaction == true, "Add Mouseover to the practice frame." end
-    if tutorial.step == 4 then return tutorial.boardTried == true, "Try a state or swap the rule order." end
-    if tutorial.step == 5 then return tutorial.otherwiseTried == true, "Try the Otherwise value." end
+    local id = tutorial.targetID
+    local settings = id and ns.GetTargetSettings and ns:GetTargetSettings(id)
+    if tutorial.step == 2 then return ns.Options and ns.Options.selected == id, "Select Tutorial Frame in the target list first." end
+    if tutorial.step == 3 then return settings ~= nil and settings.enabled ~= false, "Click Use this frame first." end
+    if tutorial.step == 5 then
+        for _, reaction in ipairs(settings and settings.reactions or {}) do
+            if reaction.condition == "mouseover" and math.abs((reaction.opacity or 0) - 1) < 0.001 then return true end
+        end
+        return false, "Add Mouseover and set its opacity to 100%."
+    end
+    if tutorial.step == 6 then
+        local first = settings and settings.reactions and settings.reactions[1]
+        return first and first.condition == "mouseover" and tutorial.hoveredBeforePriority == true and tutorial.hoveredAfterPriority == true,
+            "Hover while Stationary is first, then move Mouseover above it and hover again."
+    end
+    if tutorial.step == 7 then return settings and math.abs((settings.atRest or 1) - 1) > 0.001, "Choose a different Otherwise opacity." end
     return true
+end
+
+local function EnsureTutorialFrame()
+    local frame = ns.TutorialPracticeFrame
+    if frame then frame:Show(); return frame end
+    frame = CreateFrame("Button", nil, UIParent, "BackdropTemplate")
+    frame:SetSize(196, 62); frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 18, -18)
+    frame:SetFrameStrata("FULLSCREEN_DIALOG"); frame:SetFrameLevel(860); frame:SetToplevel(true); frame:EnableMouse(true)
+    Backdrop(frame, { 0.045, 0.06, 0.09, 0.98 }, C.teal)
+    local portrait = frame:CreateTexture(nil, "ARTWORK")
+    portrait:SetSize(42, 42); portrait:SetPoint("LEFT", 9, 0)
+    if SetPortraitTexture then SetPortraitTexture(portrait, "player") else portrait:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark") end
+    local title = Text(frame, "GameFontNormal", "TUTORIAL FRAME", C.teal); title:SetPoint("TOPLEFT", portrait, "TOPRIGHT", 9, -9)
+    local detail = Text(frame, BODY, "Temporary practice target", C.muted); detail:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
+    frame:SetScript("OnEnter", function()
+        local tutorial = ns.Tutorial
+        local settings = tutorial and tutorial.targetID and ns.GetTargetSettings and ns:GetTargetSettings(tutorial.targetID)
+        local first = settings and settings.reactions and settings.reactions[1]
+        if tutorial and tutorial.step == 6 and first then
+            if first.condition == "stationary" then
+                tutorial.hoveredBeforePriority = true
+            elseif first.condition == "mouseover" then
+                tutorial.hoveredAfterPriority = true
+            end
+            ns:RefreshTutorial()
+        end
+    end)
+    ns.TutorialPracticeFrame = frame
+    return frame
+end
+
+local function SeedTutorialStationaryRule(tutorial)
+    local settings = tutorial and tutorial.targetID and ns.GetTargetSettings and ns:GetTargetSettings(tutorial.targetID)
+    if not settings or tutorial.stationarySeeded then return settings ~= nil end
+    settings.reactions = { { id = ns:NextReactionID(), condition = "stationary", opacity = 0.30 } }
+    -- The contrast is intentional: standing still matches Stationary at 30%,
+    -- while taking a step falls through to Otherwise at a very visible 100%.
+    settings.atRest, settings.fadeDuration, settings.fadeDelay = 1, 0.12, 0
+    settings.cinematicMode = nil
+    tutorial.stationarySeeded = true
+    ns:InvalidateTargetTransition(tutorial.targetID)
+    ns:RenderOptions()
+    return true
+end
+
+local function StartTutorialTarget(tutorial, resume)
+    local panel = ns.Options
+    tutorial.previousSelected = panel and panel.selected or nil
+    tutorial.previousManagedOnly = panel and panel.managedOnly or false
+    tutorial.previousQuery = panel and panel.targetQuery or ""
+    local frame = EnsureTutorialFrame()
+    tutorial.frame = frame
+    local id, reason = ns:RegisterDiscoveredFrame(frame, "Tutorial Frame", true)
+    if not id then return false, reason end
+    tutorial.targetID = id
+    if panel then
+        panel.managedOnly, panel.targetQuery = false, ""
+        if panel.targetFilter then panel.targetFilter:SetText("") end
+        -- Step 3 onward needs the real editor to be looking at the temporary
+        -- target. Step 2 deliberately leaves selection to the player.
+        if resume and tutorial.step >= 3 then panel.selected = id end
+    end
+    if resume and tutorial.step >= 4 then
+        ns:AddTarget(id)
+        SeedTutorialStationaryRule(tutorial)
+        tutorial.hoveredBeforePriority = tutorial.step > 6
+        tutorial.hoveredAfterPriority = tutorial.step > 6
+        if tutorial.step >= 6 then
+            local settings = ns:GetTargetSettings(id)
+            settings.reactions[#settings.reactions + 1] = { id = ns:NextReactionID(), condition = "mouseover", opacity = 1 }
+            if tutorial.step >= 7 then settings.reactions[1], settings.reactions[2] = settings.reactions[2], settings.reactions[1] end
+            if tutorial.step >= 8 then settings.atRest = 0.12 end
+            ns:InvalidateTargetTransition(id)
+        end
+    end
+    ns:RenderOptions()
+    return true
+end
+
+local function CleanupTutorialTarget(tutorial)
+    if not tutorial then return end
+    local id, frame = tutorial.targetID, tutorial.frame
+    if id and ns.CanForgetCustomTarget and ns:CanForgetCustomTarget(id) then ns:ForgetCustomTarget(id) end
+    if frame then frame:SetAlpha(1); frame:Hide() end
+    if ns.Options then
+        ns.Options.managedOnly = tutorial.previousManagedOnly == true
+        ns.Options.targetQuery = tutorial.previousQuery or ""
+        if ns.Options.targetFilter then ns.Options.targetFilter:SetText(ns.Options.targetQuery) end
+        if tutorial.previousSelected and ns.TargetByID[tutorial.previousSelected] then ns.Options.selected = tutorial.previousSelected end
+    end
+    if ns.RenderOptions then ns:RenderOptions() end
 end
 
 local function CreateHelp()
     if ns.HelpCenter then return ns.HelpCenter end
-    local parent = EnsureOptions() or UIParent
-    local help = CreateFrame("Frame", "FrameGambitHelpCenter", parent, "BackdropTemplate")
-    help:SetFrameStrata("FULLSCREEN_DIALOG"); help:SetFrameLevel((parent:GetFrameLevel() or 500) + 80); help:SetToplevel(true); help:EnableMouse(true)
-    help:SetPoint("TOPLEFT", parent, "TOPLEFT", 26, -26); help:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -26, 26)
-    Backdrop(help, C.panel, C.teal); help:Hide()
-    local title = Text(help, TITLE, "Help Center", C.teal); title:SetPoint("TOPLEFT", 22, -19)
-    local sub = Text(help, BODY, "Clear answers, then a quick hands-on tour.", C.muted); sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
-    CloseButton(help, function() ns:CloseHelp() end):SetPoint("TOPRIGHT", -7, -7)
+    local help = CreateFrame("Frame", "FrameGambitHelpCenter", UIParent, "BackdropTemplate")
+    help:SetSize(760, 555)
+    local function FitToScreen()
+        local uiWidth, uiHeight = UIParent:GetSize()
+        help:SetScale(math.max(0.50, math.min(1, (uiWidth - 30) / 760, (uiHeight - 30) / 555)))
+    end
+    FitToScreen()
+    help:SetPoint("CENTER")
+    help:SetFrameStrata("FULLSCREEN_DIALOG"); help:SetFrameLevel(850); help:SetToplevel(true)
+    help:SetMovable(true); help:SetClampedToScreen(true); help:EnableMouse(true)
+    Backdrop(help, C.panel, C.accent); help:Hide()
+    CloseButton(help, function() ns:CloseHelp() end):SetPoint("TOPRIGHT", -8, -8)
+    local title = Text(help, "GameFontNormalHuge", "Help & tutorial", C.accent); title:SetPoint("TOPLEFT", 20, -18)
+    local subtitle = Text(help, BODY, "Learn the flow in a minute, or open any topic when you need it.", C.muted); subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -5)
+    local drag = CreateFrame("Frame", nil, help)
+    drag:SetPoint("TOPLEFT"); drag:SetPoint("TOPRIGHT"); drag:SetHeight(58)
+    drag:EnableMouse(true); drag:RegisterForDrag("LeftButton")
+    drag:SetScript("OnDragStart", function() help:StartMoving() end)
+    drag:SetScript("OnDragStop", function() help:StopMovingOrSizing() end)
 
     local topics = {
-        { "Start here", "Pick a frame, add a reaction, set Otherwise. That is the complete loop." },
-        { "Gambit priority", "Top to bottom matters. The first matching reaction decides the opacity." },
-        { "Relationships", "Groups reveal together. Links have a source. Visibility children can follow a parent." },
-        { "Cinematic", "A separate calm scene for questing. Your normal profile is left alone." },
-        { "Safety", "Frame Gambit only layers final opacity. It does not move, restyle, reparent, or change secure controls." },
-        { "Troubleshooting", "Use Discover visible UI, select the right root, then use Frame outline or Peek to confirm it." },
+        { title = "Start here", summary = "The quick loop", body = "Pick a frame, add a reaction, then set Otherwise. That is the complete Frame Gambit loop." },
+        { title = "Gambit priority", summary = "First matching reaction wins", body = "Frame Gambit checks reactions from top to bottom. The first matching reaction decides the frame's opacity." },
+        { title = "Relationships", summary = "Let related UI work together", body = "Groups reveal together. Links have a source. Visibility children can follow a parent." },
+        { title = "Cinematic", summary = "A separate calm scene", body = "Cinematic is a questing profile that leaves your normal profile alone. Enter it from the orange Cinematic button, then edit its frames with the familiar editor. Its top strip holds the mode toggle, black bars, and shortcut." },
+        { title = "Safety", summary = "Presentation, not control", body = "Frame Gambit layers final opacity only. It does not move, restyle, reparent, show, hide, or change secure controls owned by Blizzard or another addon." },
+        { title = "Troubleshooting", summary = "Confirm the intended frame", body = "Use Discover visible UI, select the right root, then use Frame outline or Peek to confirm it. These checks do not change the frame's layout or settings." },
     }
-    help.topicButtons, help.topicBodies = {}, {}
-    local rail = CreateFrame("Frame", nil, help, "BackdropTemplate"); rail:SetPoint("TOPLEFT", 18, -72); rail:SetPoint("BOTTOMLEFT", 18, 18); rail:SetWidth(175); Backdrop(rail, C.card, C.border)
-    local page = CreateFrame("Frame", nil, help, "BackdropTemplate"); page:SetPoint("TOPLEFT", rail, "TOPRIGHT", 10, 0); page:SetPoint("BOTTOMRIGHT", -18, 18); Backdrop(page, C.card, C.border)
-    help.page = page
-    local pageTitle = Text(page, TITLE, "Start here", C.accent); pageTitle:SetPoint("TOPLEFT", 18, -18); help.pageTitle = pageTitle
-    local pageBody = Text(page, "GameFontHighlight", "", C.muted); pageBody:SetPoint("TOPLEFT", 18, -54); pageBody:SetPoint("TOPRIGHT", -18, -54); pageBody:SetJustifyH("LEFT"); pageBody:SetJustifyV("TOP"); pageBody:SetWordWrap(true); help.pageBody = pageBody
-    for i, topic in ipairs(topics) do
-        local topicIndex, topicData = i, topic
-        local button = Button(rail, topicData[1], 151, function()
-            help.pageTitle:SetText(topicData[1]); help.pageBody:SetText(topicData[2])
-            for index, other in ipairs(help.topicButtons) do
-                other._primary = index == topicIndex; other:SetBackdropColor(unpack(index == topicIndex and C.accent or C.cardAlt))
-                other:GetFontString():SetTextColor(unpack(index == topicIndex and { 1, 1, 1, 1 } or C.accent))
-            end
-        end, i == 1)
-        button:SetPoint("TOPLEFT", rail, "TOPLEFT", 12, -14 - (i - 1) * 31); help.topicButtons[i] = button
+    local rail = CreateFrame("Frame", nil, help, "BackdropTemplate")
+    rail:SetPoint("TOPLEFT", 18, -76); rail:SetPoint("BOTTOMLEFT", 18, 62); rail:SetWidth(190); Backdrop(rail, C.cardAlt, C.border)
+    local page = CreateFrame("Frame", nil, help, "BackdropTemplate")
+    page:SetPoint("TOPLEFT", rail, "TOPRIGHT", 12, 0); page:SetPoint("BOTTOMRIGHT", -18, 62); Backdrop(page, C.card, C.border)
+    help.topicButtons, help.page = {}, page
+    page.title = Text(page, "GameFontNormalHuge", "", C.teal); page.title:SetPoint("TOPLEFT", 22, -22)
+    page.summary = Text(page, "GameFontHighlight", "", C.muted); page.summary:SetPoint("TOPLEFT", page.title, "BOTTOMLEFT", 0, -6)
+    page.rule = page:CreateTexture(nil, "ARTWORK"); page.rule:SetTexture(WHITE); page.rule:SetPoint("TOPLEFT", page.summary, "BOTTOMLEFT", 0, -14); page.rule:SetPoint("RIGHT", page, "RIGHT", -22, 0); page.rule:SetHeight(1); page.rule:SetVertexColor(unpack(C.border))
+    page.body = Text(page, "GameFontHighlight", "", { 0.84, 0.85, 0.91, 1 }); page.body:SetPoint("TOPLEFT", page.rule, "BOTTOMLEFT", 0, -20); page.body:SetPoint("BOTTOMRIGHT", -22, 22); page.body:SetJustifyH("LEFT"); page.body:SetJustifyV("TOP"); page.body:SetWordWrap(true); page.body:SetSpacing(3)
+    function help:ShowTopic(index)
+        self.topic = index
+        local topic = topics[index]
+        page.title:SetText(topic.title); page.summary:SetText(topic.summary); page.body:SetText(topic.body)
+        for buttonIndex, button in ipairs(self.topicButtons) do
+            local selected = buttonIndex == index
+            button._primary = false
+            button:SetBackdropColor(unpack(selected and { 0.08, 0.22, 0.20, 1 } or C.cardAlt))
+            button:SetBackdropBorderColor(unpack(selected and C.teal or C.border))
+            button:GetFontString():SetTextColor(unpack(selected and C.teal or C.accent))
+        end
     end
-    help.pageBody:SetText(topics[1][2])
-    local start = Button(page, "Start guided tutorial", 174, function() ns:StartTutorial() end, true)
+    for index, topic in ipairs(topics) do
+        local topicIndex = index
+        local button = Button(rail, topic.title, 174, function() help:ShowTopic(topicIndex) end)
+        button:SetHeight(42); button:SetPoint("TOPLEFT", 8, -8 - (index - 1) * 47)
+        button:GetFontString():ClearAllPoints(); button:GetFontString():SetPoint("LEFT", 10, 0); button:GetFontString():SetJustifyH("LEFT")
+        button:HookScript("OnLeave", function(self)
+            if help.topic == topicIndex then
+                self:SetBackdropColor(0.08, 0.22, 0.20, 1); self:SetBackdropBorderColor(unpack(C.teal))
+            end
+        end)
+        help.topicButtons[index] = button
+    end
+    local start = Button(help, "Start guided tutorial", 190, function() help:Hide(); ns:StartTutorial() end, true)
     start:SetPoint("BOTTOMLEFT", 18, 18); help.start = start
-    local restart = Button(page, "Restart tutorial", 130, function() ns:StartTutorial(1) end)
+    local restart = Button(help, "Restart tutorial", 125, function() help:Hide(); ns:StartTutorial(1) end)
     restart:SetPoint("LEFT", start, "RIGHT", 8, 0); help.restart = restart
-    local audit = Button(page, "Run audit", 86, function() if ns.RunDiagnostics then ns:RunDiagnostics() end; Notice("Frame Gambit audit printed to chat.", C.teal) end)
-    audit:SetPoint("BOTTOMRIGHT", -18, 18)
-    local auditHint = Text(page, BODY, "Not sure what is available? Run an audit; it only reports.", C.muted); auditHint:SetPoint("BOTTOMRIGHT", audit, "TOPRIGHT", 0, 8)
+    local close = Button(help, "Close", 90, function() help:Hide() end)
+    close:SetPoint("BOTTOMRIGHT", -18, 18)
     help:SetScript("OnHide", function()
-        -- Help is a child modal. Closing the editor also closes it, but does
-        -- not change tutorial progress.
+        help:StopMovingOrSizing()
         ClearOutline()
     end)
+    help:SetScript("OnShow", function() FitToScreen(); help:Raise() end)
+    help:ShowTopic(1)
+    local displayEvents = CreateFrame("Frame")
+    displayEvents:RegisterEvent("DISPLAY_SIZE_CHANGED"); displayEvents:RegisterEvent("UI_SCALE_CHANGED")
+    displayEvents:SetScript("OnEvent", function() if help:IsShown() then FitToScreen() end end)
+    if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = help:GetName() end
     ns.HelpCenter = help
     return help
 end
@@ -220,7 +424,10 @@ end
 local function CreateTutorial()
     if ns.TutorialCard then return ns.TutorialCard end
     local card = CreateFrame("Frame", "FrameGambitTutorial", UIParent, "BackdropTemplate")
-    card:SetSize(390, 220); card:SetFrameStrata("FULLSCREEN_DIALOG"); card:SetFrameLevel(890); card:SetToplevel(true); card:EnableMouse(true); card:SetClampedToScreen(true)
+    -- The coach card must remain readable after the player clicks a real
+    -- editor control. Keep it above the options panel; RefreshTutorial also
+    -- raises it after every live-editor refresh.
+    card:SetSize(390, 220); card:SetFrameStrata("FULLSCREEN_DIALOG"); card:SetFrameLevel(950); card:SetToplevel(true); card:EnableMouse(true); card:SetClampedToScreen(true)
     Backdrop(card, C.panel, C.teal); card:Hide()
     local kicker = Text(card, BODY, "GUIDED TOUR", C.teal); kicker:SetPoint("TOPLEFT", 16, -14)
     local title = Text(card, TITLE, "", C.accent); title:SetPoint("TOPLEFT", 16, -33); card.title = title
@@ -237,6 +444,7 @@ local function CreateTutorial()
             return
         end
         if tutorial.step >= #STEPS then ns:CancelTutorial("complete"); return end
+        if tutorial.step == 3 then SeedTutorialStationaryRule(tutorial) end
         tutorial.step = tutorial.step + 1; ns:RefreshTutorial()
     end, true)
     card.next:SetPoint("LEFT", card.back, "RIGHT", 6, 0)
@@ -248,81 +456,6 @@ local function CreateTutorial()
     validation:SetPoint("BOTTOMLEFT", 16, 39); validation:SetPoint("BOTTOMRIGHT", -16, 39)
     validation:SetJustifyH("LEFT"); card.validation = validation
 
-    local practice = CreateFrame("Frame", nil, card, "BackdropTemplate")
-    practice:SetPoint("TOPLEFT", 16, -123); practice:SetPoint("TOPRIGHT", -16, -123); practice:SetHeight(105)
-    Backdrop(practice, C.cardAlt, C.border); practice:Hide(); card.practice = practice
-    local practiceTitle = Text(practice, "GameFontNormal", "Practice frame", C.accent)
-    practiceTitle:SetPoint("TOPLEFT", 12, -10)
-    local practiceStatus = Text(practice, BODY, "Not managed", C.muted)
-    practiceStatus:SetPoint("TOPRIGHT", -12, -11); practice.status = practiceStatus
-    practice.manage = Button(practice, "Manage practice frame", 145, function()
-        if not ns.Tutorial then return end
-        ns.Tutorial.practiceSelected = true
-        ns:RefreshTutorial()
-    end, true)
-    practice.manage:SetPoint("TOPLEFT", 12, -38)
-    practice.add = Button(practice, "+ Mouseover -> 100%", 145, function()
-        if not ns.Tutorial or not ns.Tutorial.practiceSelected then return end
-        ns.Tutorial.practiceReaction = true
-        ns:RefreshTutorial()
-    end, true)
-    practice.add:SetPoint("TOPLEFT", 12, -38)
-    practice.otherwise = Button(practice, "Otherwise -> 12%", 145, function(self)
-        if not ns.Tutorial then return end
-        ns.Tutorial.otherwiseTried = true
-        ns.Tutorial.practiceOtherwise = ns.Tutorial.practiceOtherwise == 0 and 12 or 0
-        self:GetFontString():SetText("Otherwise -> " .. ns.Tutorial.practiceOtherwise .. "%")
-        ns:RefreshTutorial()
-    end)
-    practice.otherwise:SetPoint("TOPLEFT", 12, -38)
-    local practiceHint = Text(practice, BODY, "Safe practice only - your profiles stay untouched.", C.muted)
-    practiceHint:SetPoint("BOTTOMLEFT", 12, 10)
-
-    local board = CreateFrame("Frame", nil, card, "BackdropTemplate")
-    board:SetPoint("TOPLEFT", 16, -123); board:SetPoint("TOPRIGHT", -16, -123); board:SetHeight(100); Backdrop(board, C.cardAlt, C.border); board:Hide()
-    card.board = board; board.rows = { "Mouseover", "In combat", "Otherwise" }
-    for i = 1, 3 do
-        local label = Text(board, BODY, board.rows[i], i == 3 and C.muted or C.accent)
-        label:SetPoint("TOPLEFT", 12, -7 - (i - 1) * 20); board["row" .. i] = label
-    end
-    board.row1:SetText("1  Mouseover -> 100%")
-    board.row2:SetText("2  In combat -> 60%")
-    board.row3:SetText("Otherwise -> 12%")
-    local swap = Button(board, "Swap rows", 78, function()
-        if ns.Tutorial then ns.Tutorial.boardTried = true end
-        board.rows[1], board.rows[2] = board.rows[2], board.rows[1]
-        board.row1:SetText("1  " .. board.rows[1] .. (board.rows[1] == "Mouseover" and " -> 100%" or " -> 60%"))
-        board.row2:SetText("2  " .. board.rows[2] .. (board.rows[2] == "Mouseover" and " -> 100%" or " -> 60%"))
-        if board.UpdateResult then board:UpdateResult() end
-    end)
-    swap:SetPoint("TOPRIGHT", -10, -7)
-    local note = Text(board, BODY, "Both active -> Mouseover wins at 100%.", C.teal); note:SetPoint("BOTTOMLEFT", 12, 7); board.note = note
-    board.selectedState = "Both"
-    function board:UpdateResult()
-        local state = self.selectedState or "Both"
-        local result
-        if state == "Quiet" then
-            result = "No reaction matches -> Otherwise wins at 12%."
-        elseif state == "Combat" then
-            result = "In combat matches -> 60%."
-        elseif state == "Hover" then
-            result = "Mouseover matches -> 100%."
-        else
-            result = "Both match -> " .. self.rows[1] .. " wins because it is first."
-        end
-        self.note:SetText(result)
-    end
-    card.pills = {}
-    for i, data in ipairs({ { "Quiet", C.muted }, { "Combat", C.amber }, { "Hover", C.teal }, { "Both", C.accent } }) do
-        local stateName, stateColor, stateIndex = data[1], data[2], i
-        local pill = Button(card, stateName, 56, function(self)
-            if ns.Tutorial then ns.Tutorial.boardTried = true end
-            for _, other in ipairs(card.pills) do other._primary = false; other:SetBackdropColor(unpack(C.cardAlt)) end
-            self._primary = true; self:SetBackdropColor(unpack(stateColor))
-            board.selectedState = stateName; board:UpdateResult()
-        end)
-        pill:SetPoint("TOPLEFT", 16 + (stateIndex - 1) * 62, -231); card.pills[stateIndex] = pill
-    end
     card:SetScript("OnHide", function()
         -- Escape uses UISpecialFrames and hides the card directly.
         if ns.Tutorial and not ns.Tutorial.closing and not ns.Tutorial.hidingForCombat then ns:CancelTutorial("closed") end
@@ -330,21 +463,6 @@ local function CreateTutorial()
     table.insert(UISpecialFrames, "FrameGambitTutorial")
     ns.TutorialCard = card
     return card
-end
-
-local function ResetTutorialDemo(card)
-    local board = card and card.board
-    if not board then return end
-    board.rows = { "Mouseover", "In combat", "Otherwise" }
-    board.row1:SetText("1  Mouseover -> 100%")
-    board.row2:SetText("2  In combat -> 60%")
-    board.row3:SetText("Otherwise -> 12%")
-    board.selectedState = "Both"
-    board:UpdateResult()
-    for index, pill in ipairs(card.pills or {}) do
-        pill._primary = index == 4
-        pill:SetBackdropColor(unpack(index == 4 and C.accent or C.cardAlt))
-    end
 end
 
 function ns:OpenHelp()
@@ -364,7 +482,17 @@ function ns:OpenHelp()
         help.start:GetFontString():SetText("Start guided tutorial")
         help.restart:Hide()
     end
+    help:ShowTopic(1)
     help:Show()
+    help:Raise()
+end
+
+function ns:ToggleHelp()
+    if ns.HelpCenter and ns.HelpCenter:IsShown() then
+        ns:CloseHelp()
+        return
+    end
+    ns:OpenHelp()
 end
 
 function ns:CloseHelp()
@@ -383,14 +511,16 @@ function ns:StartTutorial(requestedStep)
         step = step,
         paused = false,
         wasCompleted = completed == true,
-        practiceOtherwise = 12,
-        -- Practice state is intentionally not persisted. Seed only the
-        -- prerequisites of a resumed step so it never becomes a dead end.
-        practiceSelected = step >= 3,
-        practiceReaction = step >= 4,
     }
+    local started, reason = StartTutorialTarget(ns.Tutorial, step > 1)
+    if not started then
+        local tutorial = ns.Tutorial
+        ns.Tutorial = nil
+        CleanupTutorialTarget(tutorial)
+        Notice(reason or "The temporary Tutorial Frame could not be created.", C.amber)
+        return false
+    end
     local card = CreateTutorial()
-    ResetTutorialDemo(card)
     card:Show(); ns:RefreshTutorial()
     return true
 end
@@ -400,10 +530,11 @@ function ns:CancelTutorial(reason)
     if not tutorial then return end
     local completed = reason == "complete" or tutorial.wasCompleted == true
     SaveState(completed and #STEPS or tutorial.step or 1, completed)
-    ClearOutline()
+    ClearOutline(); ClearSpotlight()
     tutorial.closing = true
     if ns.TutorialCard then ns.TutorialCard:Hide() end
     ns.Tutorial = nil
+    CleanupTutorialTarget(tutorial)
     if ns.Options and ns.Options.helpButton and ns.Options.helpButton.tutorialDot then
         ns.Options.helpButton.tutorialDot:SetShown(not completed)
     end
@@ -419,23 +550,9 @@ function ns:RefreshTutorial()
     card.validation:SetText("")
     card.progress:SetText("Step " .. tutorial.step .. " of " .. #STEPS)
     card.back:SetShown(tutorial.step > 1); card.next:GetFontString():SetText(step.finish and "Finish" or "Next")
-    local expanded = step.board == true or step.practice ~= nil
-    card:SetHeight(expanded and 330 or 220)
-    card.board:SetShown(step.board == true)
-    for _, pill in ipairs(card.pills) do pill:SetShown(step.board == true) end
-    card.practice:SetShown(step.practice ~= nil)
-    card.practice.manage:SetShown(step.practice == "select")
-    card.practice.add:SetShown(step.practice == "reaction")
-    card.practice.otherwise:SetShown(step.practice == "otherwise")
-    if step.practice then
-        card.practice.status:SetText(tutorial.practiceSelected and "Managed" or "Not managed")
-        card.practice.status:SetTextColor(unpack(tutorial.practiceSelected and C.teal or C.muted))
-        card.practice.manage:GetFontString():SetText(tutorial.practiceSelected and "Practice frame managed" or "Manage practice frame")
-        card.practice.add:GetFontString():SetText(tutorial.practiceReaction and "Mouseover added" or "+ Mouseover -> 100%")
-        card.practice.otherwise:GetFontString():SetText("Otherwise -> " .. (tutorial.practiceOtherwise or 12) .. "%")
-    end
+    card:SetHeight(220)
     local target = FindControl(step.focus)
-    Highlight(target)
+    Highlight(target); Spotlight(target)
     -- Put the card beside the highlighted target whenever there is room; the
     -- editor stays clickable and the explanation never sits on its target.
     card:SetScale(1)
@@ -446,9 +563,20 @@ function ns:RefreshTutorial()
     if compact then
         -- On a small viewport there is no honest way to fit the card beside a
         -- large editor pane. Dock it compactly and remove the competing box.
-        ClearOutline()
+        ClearOutline(); ClearSpotlight()
         card:SetScale(0.88)
         card:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -14, 14)
+        card:Raise()
+        return
+    end
+    -- A normal editor leaves a generous column to its left on wide screens.
+    -- Docking the explanation there keeps it visible *and* prevents it from
+    -- covering the real target row or button the player must click next.
+    local panelLeft
+    if panel and ns.GetUsableFrameRect then panelLeft = ns:GetUsableFrameRect(panel) end
+    if panelLeft and panelLeft >= 422 then
+        card:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 18, 18)
+        card:Raise()
         return
     end
     if SafeShown(target) then
@@ -466,15 +594,17 @@ function ns:RefreshTutorial()
     else
         card:SetPoint("CENTER", UIParent, "CENTER", 0, -UIParent:GetHeight() * 0.24)
     end
+    card:Raise()
 end
 
 function ns:OnTutorialCombatStateChanged(inCombat)
     local tutorial, card = ns.Tutorial, ns.TutorialCard
     if not tutorial or not card then return end
     if inCombat then
-        tutorial.paused = true; tutorial.hidingForCombat = true; ClearOutline()
+        tutorial.paused = true; tutorial.hidingForCombat = true; ClearOutline(); ClearSpotlight()
         card:Hide()
     elseif tutorial.paused then
         tutorial.paused = false; tutorial.hidingForCombat = false; card:Show(); card.next:Show(); card.skip:GetFontString():SetText("Skip"); ns:RefreshTutorial()
     end
 end
+

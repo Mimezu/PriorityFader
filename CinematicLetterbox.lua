@@ -1,10 +1,13 @@
+Exit code: 0
+Wall time: 0.4 seconds
+Output:
 local ADDON, ns = ...
 
 -- Frame Gambit's letterbox is a presentation overlay only. It never parents,
 -- hides, or otherwise mutates Blizzard or third-party frames.
 
-local DEFAULT_HEIGHT = 0.10
-local MIN_HEIGHT = 0.04
+local DEFAULT_HEIGHT = 0.04
+local MIN_HEIGHT = 0
 local MAX_HEIGHT = 0.25
 
 local function NormalizeHeight(value)
@@ -31,7 +34,10 @@ function ns:CreateCinematicLetterbox()
             point == "TOP" and "TOPLEFT" or "BOTTOMLEFT", 0, 0)
         frame:SetPoint(point == "TOP" and "TOPRIGHT" or "BOTTOMRIGHT", UIParent,
             point == "TOP" and "TOPRIGHT" or "BOTTOMRIGHT", 0, 0)
-        frame:SetFrameStrata("FULLSCREEN")
+        -- LOW is the first UI layer above the WorldFrame, so the bars still
+        -- cover world-space names/nameplates.  Keeping them below MEDIUM also
+        -- leaves conventional data bars visible without changing their owner.
+        frame:SetFrameStrata("LOW")
         frame:SetFrameLevel(1)
         frame:EnableMouse(false)
         local black = frame:CreateTexture(nil, "BACKGROUND")
@@ -54,10 +60,10 @@ function ns:RefreshCinematicLetterbox()
     local active = self.IsCinematicActive and self:IsCinematicActive()
     local parentHeight = UIParent and UIParent:GetHeight() or 0
     if type(parentHeight) ~= "number" or parentHeight <= 0 then parentHeight = 1080 end
-    local pixels = math.max(1, math.floor(parentHeight * height + 0.5))
+    local pixels = math.floor(parentHeight * height + 0.5)
     self.CinematicLetterboxTop:SetHeight(pixels)
     self.CinematicLetterboxBottom:SetHeight(pixels)
-    if active and enabled then
+    if active and enabled and pixels > 0 then
         self.CinematicLetterboxTop:Show()
         self.CinematicLetterboxBottom:Show()
     else
@@ -93,3 +99,4 @@ watcher:SetScript("OnEvent", function()
         if ns.RefreshCinematicLetterbox then ns:RefreshCinematicLetterbox() end
     end)
 end)
+

@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.4 seconds
+Output:
 local ADDON, ns = ...
 
 -- A Details meter is not one ordinary frame. Its title/background lives on
@@ -144,9 +147,19 @@ local function CurrentMembers(index)
 end
 
 local function Refresh(state)
+    -- ResolveTarget, IsShown, GetAlpha and hover geometry can all consult the
+    -- same composite proxy during one evaluator pass. Collapse only those
+    -- back-to-back reads; the 10 ms window is far below the 50 ms evaluator
+    -- cadence and never delays a meaningful Details instance rebuild.
+    local now = GetTime()
+    if state.refreshAt and now - state.refreshAt < 0.01 then return state.refreshOK end
+    local function Finish(ok)
+        state.refreshAt, state.refreshOK = now, ok
+        return ok
+    end
     ProcessPending()
     local members, visual, geometry = CurrentMembers(state.index)
-    if not members then return false end
+    if not members then return Finish(false) end
     local current = {}
     for _, frame in ipairs(members) do current[frame] = true end
     if state.active then
@@ -156,24 +169,24 @@ local function Refresh(state)
         for _, frame in ipairs(members) do
             if not state.records[frame] then
                 local base = CaptureBase(frame)
-                if base == nil then return false end
+                if base == nil then return Finish(false) end
                 state.records[frame] = { base = base, lastApplied = state.applied }
                 memberOwner[frame] = state
                 Hook(frame)
-                if not SetAlpha(frame, state.applied) then return false end
+                if not SetAlpha(frame, state.applied) then return Finish(false) end
             elseif not hooked[frame] then
                 local live = Alpha(frame)
-                if live == nil then return false end
+                if live == nil then return Finish(false) end
                 if math.abs(live - state.applied) > 0.001 then
                     state.records[frame].base = live
-                    if not SetAlpha(frame, state.applied) then return false end
+                    if not SetAlpha(frame, state.applied) then return Finish(false) end
                 end
             end
             state.records[frame].lastApplied = state.applied
         end
     end
     state.members, state.visual, state.geometry = members, visual, geometry
-    return true
+    return Finish(true)
 end
 
 local function UnionRect(frames)
@@ -321,3 +334,4 @@ events:SetScript("OnEvent", function(_, event, addonName)
         RegisterDetailsTargets()
     end
 end)
+
