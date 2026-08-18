@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 # Frame Gambit Retail validation
 
 Run this with Ellesmere enabled on a character that can enter and leave combat.
@@ -61,10 +58,18 @@ active profile, graph consistency, and currently unavailable adapters.
    input while invisible. While Cinematic remains active, reopen Character,
    Bags, and `/res`: each must be visible and usable above the scene, then
    return to the blackout when closed.
-7. While Cinematic remains active, open the World Map and switch between a
-   continent, zone, dungeon, and Delve map. The map must remain visible and
-   usable above the scene throughout, without turning Cinematic off.
-8. Press the orange Cinematic header button. The main editor must stay open,
+7. While Cinematic remains active, open the main Blizzard panels: Character,
+   Spellbook, Talents, Collections, Quest Log, Friends, Guild/Communities, and
+   the World Map. Each must remain visible and usable above the scene without
+   turning Cinematic off, then return to the blackout when closed. Switch the
+   World Map between continent, zone, dungeon, and Delve views as part of this
+   check.
+8. Press the usual shortcut bindings for Bags, Character, Spells, Talents,
+   Quest Log, Map, Social, and Guild. Also check Collections, Group Finder,
+   PvP, Calendar, Professions, Macro, Key Bindings, and Escape. None may open
+   invisibly or retain mouse input; closing it returns that window to the
+   Cinematic blackout.
+9. Press the orange Cinematic header button. The main editor must stay open,
    gain its orange border, default the target rail to **Managed**, and show a
    separate inline Cinematic strip without covering the subtitle or Presence
    panel. Managed dots and live-state accents must be orange; unavailable
@@ -353,4 +358,3 @@ active profile, graph consistency, and currently unavailable adapters.
    priority without moving, restyling, or changing clicks on the unit frame.
 3. Disable Cinematic/remove the Player target. EUI's latest requested wrapper
    alpha must be restored rather than a hardcoded 100%.
-

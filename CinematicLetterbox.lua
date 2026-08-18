@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 local ADDON, ns = ...
 
 -- Frame Gambit's letterbox is a presentation overlay only. It never parents,
@@ -99,4 +96,3 @@ watcher:SetScript("OnEvent", function()
         if ns.RefreshCinematicLetterbox then ns:RefreshCinematicLetterbox() end
     end)
 end)
-

@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 # Frame Gambit
 
 Frame Gambit is a World of Warcraft addon by **Mimezu** for approachable, ordered frame-visibility rules. It can manage Blizzard and addon-owned UI frames while leaving their layout, styling, and gameplay behavior with the original UI addon.
@@ -73,4 +70,3 @@ Frame Gambit is an alpha-only presentation layer. It does not rewrite another ad
 ## Releases
 
 Generated zip archives under `Versions/` are intentionally excluded from Git. Source releases should be represented by Git tags.
-

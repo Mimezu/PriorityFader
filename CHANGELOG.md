@@ -1,9 +1,18 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 # Frame Gambit changelog
 
 ## Unreleased
+
+## 2.7.0 - Cinematic panel reliability
+
+- Corrects the malformed 2.6.0 public ZIP so Frame Gambit loads and every
+  documented slash command works after installation.
+- Cinematic now recognizes all Blizzard panel-manager windows as intentional
+  player windows. It closes them when the scene starts, then keeps any opened
+  afterward visible and usable above the scene, including future standard
+  panels instead of relying on a hand-maintained exception list. Friends and
+  guild/community windows also have direct Retail-version fallbacks. Bags,
+  spells/talents, collections, group/PvP finder, calendar, profession, macro,
+  keybinding, and common interaction frames have the same fallback coverage.
 
 ## 2.6.0 - Cinematic editor and expanded gambits
 
@@ -217,59 +226,7 @@ Output:
 
 ## 2.4.1 - managed target filter
 
-- Adds a compact Managed only toggle to the target rail. It shows only frames
-  controlled by the current profile without changing any frame or rule.
-
-## 2.4.0 - Cinematic editing clarity and casting state
-
-- Replaces the ambiguous duplicate Rules actions with a single header-level
-  Back to editor action and a clearly named Fine-tune profile action.
-- Fine-tuning always opens the Cinematic system profile; if the scene is off,
-  Priority Fader turns it on first rather than editing the active normal
-  profile by accident.
-- Introduces a warm Cinematic identity for its dedicated controls and live
-  profile editor. Version 2.4.2 narrows that treatment after visual testing.
-- Adds `Is casting` as a normal state condition for player casts, channels,
-  and empowered casts, including combat-safe event tracking.
-
-## 2.3.0 - experimental EUI CDM icon bars
-
-- Adds one normal Priority Fader target for every live Ellesmere CDM bar,
-  including user-created custom bars.
-- Uses the EUI bar shell for hover geometry while fading its assigned
-  Blizzard icon frames, since those icons are not children of the shell.
-- Composes PF opacity with EUI's latest per-icon opacity so hidden,
-  cooldown-lowered, alert, placeholder, styling, and layout behavior remain
-  owned by EUI.
-- Restores the latest EUI-requested opacity whenever PF releases a CDM bar.
-- Picker selections on an EUI CDM shell now resolve to its dedicated icon-bar
-  target instead of a misleading container-only target.
-- Makes no changes to EllesmereUI files or SavedVariables.
-- Extends the existing Minimap target to fade descendants that explicitly
-  ignore parent alpha and EUI's separate grouped-button panel, while preserving
-  each element's own host opacity and click behavior.
-- Makes the Ellesmere Player Frame adapter control EUI's real player
-  visibility wrapper while retaining the unit frame itself for hover and
-  preview geometry. This fixes Player remaining invisible in Cinematic Mode
-  even though the equivalent Target rule was active.
-
-## 2.2.6 - reliable visual selector
-
-- Replaced the selector's failing global frame enumeration with the same
-  UIParent hierarchy used successfully by visible-UI discovery. Visible roots
-  and descendants are mapped incrementally, then indexed for cursor and wheel
-  selection.
-- Increased overview guides to clear two-pixel lavender wireframes and stacked
-  candidates to teal, while keeping every overlay mouse-transparent.
-- Mapping totals now remain visible after scanning and distinguish an empty map
-  from simply pointing at world space outside a UI frame.
-- Cinematic Mode now explicitly exempts Blizzard's nameplate driver and
-  Ellesmere's anonymous pooled enemy/friendly nameplate roots, including while
-  those pools are hidden and waiting to be reused.
-- Untouched Cinematic player/target defaults now reveal for combat, any target,
-  or hover. Existing customized rules remain unchanged.
-
-## 2.2.5 - full-canvas editor peek
+- Adds a compact Managed only toggle to the target rail. It shows only fram˜≠m¢Gß≤⁄Óù∆≠y“ peek
 
 - Added a compact Peek control to the Rules header. It collapses the full
   editor into a small top-center return bar so the entire game canvas can be
@@ -559,4 +516,3 @@ Output:
 
 - Initial adapters, ordered opacity reactions, spotlight picker, grouping, and
   parent-to-child hover links.
-

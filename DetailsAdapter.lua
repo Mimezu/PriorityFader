@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 local ADDON, ns = ...
 
 -- A Details meter is not one ordinary frame. Its title/background lives on
@@ -334,4 +331,3 @@ events:SetScript("OnEvent", function(_, event, addonName)
         RegisterDetailsTargets()
     end
 end)
-

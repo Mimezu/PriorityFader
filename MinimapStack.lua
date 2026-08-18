@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 local ADDON, ns = ...
 
 -- Some Minimap descendants deliberately ignore parent alpha (notably pooled
@@ -374,356 +371,83 @@ end
 local function ReadNativeMarkerScale(minimap)
     -- GetIconScale is available on current Retail builds, but it is deliberately
     -- optional here: UI skins and older client variants do not all publish it.
-    -- A future host SetIconScale call is the other authoritative source.
-    local value = Method(minimap, "GetIconScale")
-    return ValidScale(value) and value or nil
-end
-
-local function CaptureNativeMarkerHostScale(minimap, allowAssumedDefault)
-    if nativeMarkerHostScale ~= nil then return nativeMarkerHostScale end
-    local value = ReadNativeMarkerScale(minimap)
-    if value ~= nil then
-        nativeMarkerHostScale = value
-        nativeMarkerBaselineAssumed = false
-    elseif allowAssumedDefault then
-        -- Some Retail builds expose only SetIconScale. Selecting an
-        -- experimental marker mode is the user's explicit opt-in to use the
-        -- native 100% scale as the temporary restoration baseline. The
-        -- default "Leave unchanged" mode never reaches this path.
-        nativeMarkerHostScale = 1
-        nativeMarkerBaselineAssumed = true
-    end
-    return nativeMarkerHostScale
-end
-
-local function HasNativeMarkerSetter(minimap)
-    if not minimap then return false end
-    local ok, setter = pcall(function() return minimap.SetIconScale end)
-    return ok and type(setter) == "function"
-end
-
-local function SetNativeMarkerScale(minimap, value)
-    if not minimap or not ValidScale(value) then return false end
-    local okMethod, setter = pcall(function() return minimap.SetIconScale end)
-    if not okMethod or type(setter) ~= "function" then return false end
-    nativeMarkerGuard = true
-    local ok = pcall(setter, minimap, value)
-    nativeMarkerGuard = false
-    return ok
-end
-
-local function NativeRingGetterName(setterName)
-    return "Get" .. setterName:sub(4)
-end
-
-local function CaptureNativeRingHostAlpha(minimap, setterName, allowAssumedDefault)
-    local known = nativeRingHostAlpha[setterName]
-    if known ~= nil then return known end
-    local value = Method(minimap, NativeRingGetterName(setterName))
-    if ValidAlpha(value) then
-        nativeRingHostAlpha[setterName] = value
-        nativeRingBaselineAssumed[setterName] = nil
-    elseif allowAssumedDefault then
-        -- These APIs do not consistently provide getters. Experimental marker
-        -- modes use the same explicit 100% fallback as SetIconScale until the
-        -- host announces a real ring alpha through its setter.
-        nativeRingHostAlpha[setterName] = 1
-        nativeRingBaselineAssumed[setterName] = true
-    end
-    return nativeRingHostAlpha[setterName]
-end
-
-local function SetNativeRingAlpha(minimap, setterName, value)
-    if not minimap or not ValidAlpha(value) then return false end
-    local okMethod, setter = pcall(function() return minimap[setterName] end)
-    if not okMethod or type(setter) ~= "function" then return false end
-    nativeRingGuard = true
-    local ok = pcall(setter, minimap, value)
-    nativeRingGuard = false
-    return ok
-end
-
-local function NativeRingWanted(hostAlpha, alpha, mode)
-    if mode == "scale" then return hostAlpha * alpha end
-    if mode == "hide_zero" then return alpha <= 0.001 and 0 or hostAlpha end
-end
-
-local function HookNativeMarkerRings(minimap)
-    if not minimap or type(hooksecurefunc) ~= "function" then return end
-    for _, setterName in ipairs(NATIVE_RING_ALPHA_SETTERS) do
-        if not nativeRingHooked[setterName] then
-            local ok = pcall(hooksecurefunc, minimap, setterName, function(_, value)
-                if nativeRingGuard or not ValidAlpha(value) then return end
-                nativeRingHostAlpha[setterName] = value
-                nativeRingBaselineAssumed[setterName] = nil
-                nativeRingAppliedAlpha[setterName] = value
-                nativeRingRestorePending = false
-                local wanted = NativeRingWanted(value, nativeMarkerAlpha, nativeMarkerMode)
-                if wanted ~= nil and math.abs(value - wanted) > 0.001
-                    and SetNativeRingAlpha(minimap, setterName, wanted) then
-                    nativeRingAppliedAlpha[setterName] = wanted
-                    nativeRingAuditAt = GetTime()
-                end
-            end)
-            if ok then nativeRingHooked[setterName] = true end
-        end
-    end
-end
-
-local function RestoreNativeMarkerRings(minimap)
-    if next(nativeRingAppliedAlpha) == nil then
-        nativeRingRestorePending = false
-        nativeRingAuditAt = 0
-        return true
-    end
-    local complete = true
-    for setterName, applied in pairs(nativeRingAppliedAlpha) do
-        local restore = CaptureNativeRingHostAlpha(minimap, setterName)
-        if restore == nil then
-            complete = false
-        elseif math.abs(applied - restore) > 0.001 and not SetNativeRingAlpha(minimap, setterName, restore) then
-            complete = false
-        else
-            nativeRingAppliedAlpha[setterName] = nil
-        end
-    end
-    nativeRingRestorePending = not complete
-    if complete then nativeRingAuditAt = 0 end
-    return complete
-end
-
-local function UpdateNativeMarkerRings(minimap, alpha, mode)
-    if mode ~= "hide_zero" and mode ~= "scale" then
-        RestoreNativeMarkerRings(minimap)
-        return
-    end
-    HookNativeMarkerRings(minimap)
-    local now = GetTime()
-    for _, setterName in ipairs(NATIVE_RING_ALPHA_SETTERS) do
-        local hostAlpha = CaptureNativeRingHostAlpha(minimap, setterName, true)
-        local wanted = hostAlpha and NativeRingWanted(hostAlpha, alpha, mode)
-        local applied = nativeRingAppliedAlpha[setterName]
-        -- Native map rebuilds can restore a blob ring without calling its Lua
-        -- setter. Reassert only while a fully faded Minimap needs it hidden.
-        local auditDue = wanted and wanted <= 0.001 and now - nativeRingAuditAt >= 0.25
-        if wanted ~= nil and (auditDue or applied == nil or math.abs(applied - wanted) > 0.001)
-            and SetNativeRingAlpha(minimap, setterName, wanted) then
-            nativeRingAppliedAlpha[setterName] = wanted
-            nativeRingAuditAt = now
-        end
-    end
-    nativeRingRestorePending = false
-end
-
-local function HookNativeMarkers(minimap)
-    if nativeMarkerHooked or not minimap or type(hooksecurefunc) ~= "function" then return end
-    local ok = pcall(hooksecurefunc, minimap, "SetIconScale", function(_, value)
-        if nativeMarkerGuard or not ValidScale(value) then return end
-        nativeMarkerHostScale = value
-        nativeMarkerBaselineAssumed = false
-        nativeMarkerScale = value
-        nativeMarkerRestorePending = false
-        local wanted
-        if nativeMarkerMode == "scale" then
-            wanted = value * nativeMarkerAlpha
-        elseif nativeMarkerMode == "hide_zero" then
-            wanted = nativeMarkerAlpha <= 0.001 and 0 or value
-        end
-        nativeMarkerWanted = wanted
-        if wanted ~= nil and math.abs(value - wanted) > 0.001 then
-            if SetNativeMarkerScale(minimap, wanted) then
-                nativeMarkerScale = wanted
-                nativeMarkerAuditAt = GetTime()
-            end
-        end
-    end)
-    if ok then nativeMarkerHooked = true end
-end
-
-local function RestoreNativeMarkers(minimap)
-    -- If an override was never applied there is nothing to put back.  Clear
-    -- immediately rather than attempting to "restore" an assumed scale.
-    if nativeMarkerScale == nil then
-        nativeMarkerWanted = nil
-        nativeMarkerMode = nil
-        nativeMarkerAlpha = 1
-        nativeMarkerRestorePending = false
-        nativeMarkerAuditAt = 0
-        return true
-    end
-
-    -- Stop composing immediately, even if the host setter is temporarily
-    -- unavailable.  A later host SetIconScale call must become the new host
-    -- baseline instead of being transformed by the old fade mode.
-    nativeMarkerWanted = nil
-    nativeMarkerMode = nil
-    nativeMarkerAlpha = 1
-    local restore = CaptureNativeMarkerHostScale(minimap)
-    if restore == nil then
-        -- We never overwrite an unknown host scale.  Keep retrying in case the
-        -- client later exposes a getter or the host calls SetIconScale.
-        nativeMarkerRestorePending = true
-        return false
-    end
-
-    if math.abs(nativeMarkerScale - restore) > 0.001 and not SetNativeMarkerScale(minimap, restore) then
-        -- Failed setters are transient during client rebuilds/lockdown.  Do
-        -- not lose the original host scale; the next update will retry.
-        nativeMarkerRestorePending = true
-        return false
-    end
-
-    nativeMarkerScale = nil
-    -- Keep the last authoritative host baseline. Some Retail builds expose
-    -- SetIconScale without a matching getter, so forgetting a value announced
-    -- by the host would make the safe experimental modes unavailable again on
-    -- the very next keep-mode update. A later host setter refreshes this value
-    -- through HookNativeMarkers.
-    nativeMarkerRestorePending = false
-    nativeMarkerAuditAt = 0
-    return true
-end
-
-local function UpdateNativeMarkers(minimap, alpha, mode)
-    if mode ~= "hide_zero" and mode ~= "scale" then
-        RestoreNativeMarkers(minimap)
-        return
-    end
-    HookNativeMarkers(minimap)
-    local hostScale = CaptureNativeMarkerHostScale(minimap, true)
-    if hostScale == nil then
-        -- The setter itself is unavailable or rejected. Keep the requested
-        -- mode recorded, but do not claim that a visual change was applied.
-        nativeMarkerMode = mode
-        nativeMarkerAlpha = alpha
-        nativeMarkerWanted = nil
-        return
-    end
-    nativeMarkerMode = mode
-    nativeMarkerAlpha = alpha
-    nativeMarkerRestorePending = false
-    local wanted = mode == "scale" and (hostScale * alpha)
-        or (alpha <= 0.001 and 0 or hostScale)
-    nativeMarkerWanted = wanted
-    local now = GetTime()
-    -- Blizzard's native blip compositor can rebuild without making a Lua
-    -- SetIconScale call. Reassert at a low rate so a rebuilt quest/service-pin
-    -- layer cannot remain visible while the Minimap is fully faded.
-    local auditDue = wanted <= 0.001 and now - nativeMarkerAuditAt >= 0.25
-    if auditDue or nativeMarkerScale == nil or math.abs(nativeMarkerScale - wanted) > 0.001 then
-        if SetNativeMarkerScale(minimap, wanted) then
-            nativeMarkerScale = wanted
-            nativeMarkerAuditAt = now
-        end
-    end
-end
-
-function ns:GetMinimapNativeMarkerAvailability(mode)
-    local minimap = _G.Minimap
-    if not minimap then return false, "The native Minimap is not available." end
-    if not HasNativeMarkerSetter(minimap) then
-        return false, "This WoW build does not expose native marker scaling."
-    end
-    -- Install the read-only post-hook even while leaving markers unchanged. If
-    -- Blizzard or the owning UI later announces a scale, experimental modes
-    -- can become available without guessing or requiring a reload.
-    HookNativeMarkers(minimap)
-    if CaptureNativeMarkerHostScale(minimap) ~= nil then
-        if nativeMarkerBaselineAssumed then
-            return true, "This WoW build cannot read the current native marker scale. Because an experimental marker mode is selected, Frame Gambit is using 100% as its restoration baseline until Blizzard or the owning UI announces another value."
-        end
-        return true
-    end
-    local note = "This WoW build cannot read the current native marker scale. Choosing an experimental marker mode will explicitly use 100% as its restoration baseline; Leave unchanged never writes it."
-    if mode == "hide_zero" or mode == "scale" then
-        CaptureNativeMarkerHostScale(minimap, true)
-    end
-    return true, note
-end
-
-function ns:HasMinimapStackPendingWork()
-    return nativeMarkerRestorePending == true or nativeRingRestorePending == true
-        or scan ~= nil or next(pending) ~= nil
-end
-
-function ns:UpdateMinimapStack(rescan)
-    ProcessPending()
-    local minimap = _G.Minimap
-    local active = self.runtime and self.runtime.active and self.runtime.active.minimap
-    local controlled = self.runtime and self.runtime.frameByID and self.runtime.frameByID.minimap == minimap
-    local nextMultiplier = active and active.alpha
-    if not minimap or not controlled or not ValidAlpha(nextMultiplier) then
-        local frames = {}
-        for frame in pairs(owned) do frames[#frames + 1] = frame end
-        for _, frame in ipairs(frames) do Release(frame) end
-        multiplier = 1
-        scan = nil
-        RestoreNativeMarkers(minimap or _G.Minimap)
-        RestoreNativeMarkerRings(minimap or _G.Minimap)
-        return
-    end
-    local settings = self.GetTargetSettings and self:GetTargetSettings("minimap")
-    local markerMode = settings and settings.nativeMarkerMode or "keep"
-    UpdateNativeMarkers(minimap, nextMultiplier, markerMode)
-    UpdateNativeMarkerRings(minimap, nextMultiplier, markerMode)
-    local changed = math.abs(multiplier - nextMultiplier) > 0.001
-    multiplier = nextMultiplier
-    if rescan and not scan then BeginScan(minimap) end
-    if rescan then
-        -- The EUI flyout is a tiny, exact adapter and should become a
-        -- Cinematic exemption immediately; descendant pin discovery can keep
-        -- progressing incrementally without delaying the visible button stack.
-        local semantic = {}
-        AddSemanticMinimapFrames(semantic, minimap)
-        for frame in pairs(semantic) do
-            local otherID = self.runtime.managedIDByFrame and self.runtime.managedIDByFrame[frame]
-            if not otherID or otherID == "minimap" then Claim(frame) end
-        end
-    end
-    if scan then
-        local discovered = ContinueScan(minimap)
-        if discovered then
-        local current = {}
-        for frame in pairs(discovered) do
-            local otherID = self.runtime.managedIDByFrame and self.runtime.managedIDByFrame[frame]
-            if not otherID or otherID == "minimap" then
-                current[frame] = true
-                Claim(frame)
-            end
-        end
-        local retired = {}
-        for frame in pairs(owned) do if not current[frame] then retired[#retired + 1] = frame end end
-        for _, frame in ipairs(retired) do Release(frame) end
-        end
-    end
-    -- Target ownership can change without Minimap topology changing. Never
-    -- compose the stack multiplier onto a frame now controlled explicitly by
-    -- another Priority Fader target.
-    local conflicted = {}
-    for frame in pairs(owned) do
-        local otherID = self.runtime.managedIDByFrame and self.runtime.managedIDByFrame[frame]
-        if otherID and otherID ~= "minimap" then conflicted[#conflicted + 1] = frame end
-    end
-    for _, frame in ipairs(conflicted) do Release(frame) end
-    for frame in pairs(owned) do
-        local last = appliedAlpha[frame]
-        if not hooked[frame] then
-            local live = Alpha(frame)
-            if live ~= nil and last ~= nil and math.abs(live - last) > 0.001 then hostAlpha[frame] = live end
-        end
-        local wanted = hostAlpha[frame] and hostAlpha[frame] * multiplier
-        if wanted and (changed or last == nil or math.abs(wanted - last) > 0.001) then Apply(frame) end
-    end
-end
-
-function ns:IsMinimapStackFrame(frame)
-    return frame and owned[frame] == true or false
-end
-
-function ns:MinimapStackContainsCursor()
-    for frame in pairs(owned) do
-        if not hoverExcluded[frame] and self:FrameContainsCursor(frame) then return true end
-    end
-    return false
-end
-
+    -- A future host SetIconScale call is the other authoritative sourcçËh‘éì¶»§q«^t][
+BˆYˆ˜]]™SX\šÙ\’ÜİØØ[HHš[[ˆ™]\›ˆ˜]]™SX\šÙ\’ÜİØØ[H[™ˆØØ[˜[YHH™XY˜]]™SX\šÙ\”ØØ[JZ[š[X\
+BˆYˆ˜[YHHš[[‚ˆ˜]]™SX\šÙ\’ÜİØØ[HH˜[YBˆ˜]]™SX\šÙ\˜\Ù[[™P\Üİ[YYH˜[ÙBˆ[ÙZYˆ[İĞ\Üİ[YYY˜][[‚ˆKHÛÛYH™]Z[Z[È^ÜÙHÛ›HÙ]XÛÛ”ØØ[KˆÙ[Xİ[™È[‚ˆKH^\š[Y[[X\šÙ\ˆ[ÙH\ÈH\Ù\‰ÜÈ^XÚ]ÜZ[ˆÈ\ÙHBˆKH˜]]™HL	HØØ[H\ÈH[\Ü˜\H™\İÜ˜][Ûˆ˜\Ù[[™KˆBˆKHY˜][“X]™H[˜Ú[™ÙYˆ[ÙH™]™\ˆ™XXÚ\È\È]‚ˆ˜]]™SX\šÙ\’ÜİØØ[HHBˆ˜]]™SX\šÙ\˜\Ù[[™P\Üİ[YYHYBˆ[™ˆ™]\›ˆ˜]]™SX\šÙ\’ÜİØØ[B™[™‚›ØØ[[˜İ[Ûˆ\Ó˜]]™SX\šÙ\”Ù]\ŠZ[š[X\
+BˆYˆ›İZ[š[X\[ˆ™]\›ˆ˜[ÙH[™ˆØØ[ÚËÙ]\ˆHØ[
+[˜İ[ÛŠ
+H™]\›ˆZ[š[X\”Ù]XÛÛ”ØØ[H[™
+Bˆ™]\›ˆÚÈ[™\JÙ]\ŠHOH™[˜İ[Ûˆ‚™[™‚›ØØ[[˜İ[ÛˆÙ]˜]]™SX\šÙ\”ØØ[JZ[š[X\˜[YJBˆYˆ›İZ[š[X\Üˆ›İ˜[YØØ[J˜[YJH[ˆ™]\›ˆ˜[ÙH[™ˆØØ[ÚÓY]ÙÙ]\ˆHØ[
+[˜İ[ÛŠ
+H™]\›ˆZ[š[X\”Ù]XÛÛ”ØØ[H[™
+BˆYˆ›İÚÓY]ÙÜˆ\JÙ]\ŠHH™[˜İ[Ûˆˆ[ˆ™]\›ˆ˜[ÙH[™ˆ˜]]™SX\šÙ\‘İX\™HYBˆØØ[ÚÈHØ[
+Ù]\‹Z[š[X\˜[YJBˆ˜]]™SX\šÙ\‘İX\™H˜[ÙBˆ™]\›ˆÚÂ™[™‚›ØØ[[˜İ[Ûˆ˜]]™Tš[™ÑÙ]\“˜[YJÙ]\“˜[YJBˆ™]\›ˆ‘Ù]ˆ‹ˆÙ]\“˜[YNœİXŠ
+B™[™‚›ØØ[[˜İ[ÛˆØ\\™S˜]]™Tš[™ÒÜİ[JZ[š[X\Ù]\“˜[YK[İĞ\Üİ[YYY˜][
+BˆØØ[Û›İÛˆH˜]]™Tš[™ÒÜİ[VÜÙ]\“˜[YWBˆYˆÛ›İÛˆHš[[ˆ™]\›ˆÛ›İÛˆ[™ˆØØ[˜[YHHY]Ù
+Z[š[X\˜]]™Tš[™ÑÙ]\“˜[YJÙ]\“˜[YJJBˆYˆ˜[Y[J˜[YJH[‚ˆ˜]]™Tš[™ÒÜİ[VÜÙ]\“˜[YWHH˜[YBˆ˜]]™Tš[™Ğ˜\Ù[[™P\Üİ[YYÜÙ]\“˜[YWHHš[ˆ[ÙZYˆ[İĞ\Üİ[YYY˜][[‚ˆKH\ÙHT\ÈÈ›İÛÛœÚ\İ[H›İšYHÙ]\œËˆ^\š[Y[[X\šÙ\‚ˆKH[Ù\È\ÙHHØ[YH^XÚ]L	H˜[˜XÚÈ\ÈÙ]XÛÛ”ØØ[H[[BˆKHÜİ[››İ[˜Ù\ÈH™X[š[™È[H›İYÚ]ÈÙ]\‹‚ˆ˜]]™Tš[™ÒÜİ[VÜÙ]\“˜[YWHHBˆ˜]]™Tš[™Ğ˜\Ù[[™P\Üİ[YYÜÙ]\“˜[YWHHYBˆ[™ˆ™]\›ˆ˜]]™Tš[™ÒÜİ[VÜÙ]\“˜[YWB™[™‚›ØØ[[˜İ[ÛˆÙ]˜]]™Tš[™Ğ[JZ[š[X\Ù]\“˜[YK˜[YJBˆYˆ›İZ[š[X\Üˆ›İ˜[Y[J˜[YJH[ˆ™]\›ˆ˜[ÙH[™ˆØØ[ÚÓY]ÙÙ]\ˆHØ[
+[˜İ[ÛŠ
+H™]\›ˆZ[š[X\ÜÙ]\“˜[YWH[™
+BˆYˆ›İÚÓY]ÙÜˆ\JÙ]\ŠHH™[˜İ[Ûˆˆ[ˆ™]\›ˆ˜[ÙH[™ˆ˜]]™Tš[™ÑİX\™HYBˆØØ[ÚÈHØ[
+Ù]\‹Z[š[X\˜[YJBˆ˜]]™Tš[™ÑİX\™H˜[ÙBˆ™]\›ˆÚÂ™[™‚›ØØ[[˜İ[Ûˆ˜]]™Tš[™ÕØ[Y
+Üİ[K[K[ÙJBˆYˆ[ÙHOHœØØ[Hˆ[ˆ™]\›ˆÜİ[H
+ˆ[H[™ˆYˆ[ÙHOHšYWŞ™\›Èˆ[ˆ™]\›ˆ[HHŒH[™ÜˆÜİ[H[™™[™‚›ØØ[[˜İ[ÛˆÛÚÓ˜]]™SX\šÙ\”š[™ÜÊZ[š[X\
+BˆYˆ›İZ[š[X\Üˆ\JÛÚÜÙXİ\™Y[˜ÊHH™[˜İ[Ûˆˆ[ˆ™]\›ˆ[™ˆ›ÜˆËÙ]\“˜[YH[ˆ\Z\œÊUU‘WÔ’S‘×ĞSWÔÑUT”ÊHÂˆYˆ›İ˜]]™Tš[™ÒÛÚÙYÜÙ]\“˜[YWH[‚ˆØØ[ÚÈHØ[
+ÛÚÜÙXİ\™Y[˜ËZ[š[X\Ù]\“˜[YK[˜İ[ÛŠË˜[YJBˆYˆ˜]]™Tš[™ÑİX\™Üˆ›İ˜[Y[J˜[YJH[ˆ™]\›ˆ[™ˆ˜]]™Tš[™ÒÜİ[VÜÙ]\“˜[YWHH˜[YBˆ˜]]™Tš[™Ğ˜\Ù[[™P\Üİ[YYÜÙ]\“˜[YWHHš[ˆ˜]]™Tš[™Ğ\YY[VÜÙ]\“˜[YWHH˜[YBˆ˜]]™Tš[™Ô™\İÜ™T[™[™ÈH˜[ÙBˆØØ[Ø[YH˜]]™Tš[™ÕØ[Y
+˜[YK˜]]™SX\šÙ\[K˜]]™SX\šÙ\“[ÙJBˆYˆØ[YHš[[™X]˜XœÊ˜[YHHØ[Y
+HˆŒBˆ[™Ù]˜]]™Tš[™Ğ[JZ[š[X\Ù]\“˜[YKØ[Y
+H[‚ˆ˜]]™Tš[™Ğ\YY[VÜÙ]\“˜[YWHHØ[Yˆ˜]]™Tš[™Ğ]Y]]HÙ][YJ
+Bˆ[™ˆ[™
+BˆYˆÚÈ[ˆ˜]]™Tš[™ÒÛÚÙYÜÙ]\“˜[YWHHYH[™ˆ[™ˆ[™™[™‚›ØØ[[˜İ[Ûˆ™\İÜ™S˜]]™SX\šÙ\”š[™ÜÊZ[š[X\
+BˆYˆ™^
+˜]]™Tš[™Ğ\YY[JHOHš[[‚ˆ˜]]™Tš[™Ô™\İÜ™T[™[™ÈH˜[ÙBˆ˜]]™Tš[™Ğ]Y]]Hˆ™]\›ˆYBˆ[™ˆØØ[ÛÛ\]HHYBˆ›ÜˆÙ]\“˜[YK\YY[ˆZ\œÊ˜]]™Tš[™Ğ\YY[JHÂˆØØ[™\İÜ™HHØ\\™S˜]]™Tš[™ÒÜİ[JZ[š[X\Ù]\“˜[YJBˆYˆ™\İÜ™HOHš[[‚ˆÛÛ\]HH˜[ÙBˆ[ÙZYˆX]˜XœÊ\YYH™\İÜ™JHˆŒH[™›İÙ]˜]]™Tš[™Ğ[JZ[š[X\Ù]\“˜[YK™\İÜ™JH[‚ˆÛÛ\]HH˜[ÙBˆ[ÙBˆ˜]]™Tš[™Ğ\YY[VÜÙ]\“˜[YWHHš[ˆ[™ˆ[™ˆ˜]]™Tš[™Ô™\İÜ™T[™[™ÈH›İÛÛ\]BˆYˆÛÛ\]H[ˆ˜]]™Tš[™Ğ]Y]]H[™ˆ™]\›ˆÛÛ\]B™[™‚›ØØ[[˜İ[Ûˆ\]S˜]]™SX\šÙ\”š[™ÜÊZ[š[X\[K[ÙJBˆYˆ[ÙHHšYWŞ™\›Èˆ[™[ÙHHœØØ[Hˆ[‚ˆ™\İÜ™S˜]]™SX\šÙ\”š[™ÜÊZ[š[X\
+Bˆ™]\›‚ˆ[™ˆÛÚÓ˜]]™SX\šÙ\”š[™ÜÊZ[š[X\
+BˆØØ[›İÈHÙ][YJ
+Bˆ›ÜˆËÙ]\“˜[YH[ˆ\Z\œÊUU‘WÔ’S‘×ĞSWÔÑUT”ÊHÂˆØØ[Üİ[HHØ\\™S˜]]™Tš[™ÒÜİ[JZ[š[X\Ù]\“˜[YKYJBˆØØ[Ø[YHÜİ[H[™˜]]™Tš[™ÕØ[Y
+Üİ[K[K[ÙJBˆØØ[\YYH˜]]™Tš[™Ğ\YY[VÜÙ]\“˜[YWBˆKH˜]]™HX\™XZ[ÈØ[ˆ™\İÜ™HH›Øˆš[™ÈÚ]İ]Ø[[™È]ÈXBˆKHÙ]\‹ˆ™X\ÜÙ\Û›HÚ[HH[H˜YYZ[š[X\™YYÈ]Y[‹‚ˆØØ[]Y]YHHØ[Y[™Ø[YHŒH[™›İÈH˜]]™Tš[™Ğ]Y]]HŒBˆYˆØ[YHš[[™
+]Y]YHÜˆ\YYOHš[ÜˆX]˜XœÊ\YYHØ[Y
+HˆŒJBˆ[™Ù]˜]]™Tš[™Ğ[JZ[š[X\Ù]\“˜[YKØ[Y
+H[‚ˆ˜]]™Tš[™Ğ\YY[VÜÙ]\“˜[YWHHØ[Yˆ˜]]™Tš[™Ğ]Y]]H›İÂˆ[™ˆ[™ˆ˜]]™Tš[™Ô™\İÜ™T[™[™ÈH˜[ÙB™[™‚›ØØ[[˜İ[ÛˆÛÚÓ˜]]™SX\šÙ\œÊZ[š[X\
+BˆYˆ˜]]™SX\šÙ\’ÛÚÙYÜˆ›İZ[š[X\Üˆ\JÛÚÜÙXİ\™Y[˜ÊHH™[˜İ[Ûˆˆ[ˆ™]\›ˆ[™ˆØØ[ÚÈHØ[
+ÛÚÜÙXİ\™Y[˜ËZ[š[X\”Ù]XÛÛ”ØØ[H‹[˜İ[ÛŠË˜[YJBˆYˆ˜]]™SX\šÙ\‘İX\™Üˆ›İ˜[YØØ[J˜[YJH[ˆ™]\›ˆ[™ˆ˜]]™SX\šÙ\’ÜİØØ[HH˜[YBˆ˜]]™SX\šÙ\˜\Ù[[™P\Üİ[YYH˜[ÙBˆ˜]]™SX\šÙ\”ØØ[HH˜[YBˆ˜]]™SX\šÙ\”™\İÜ™T[™[™ÈH˜[ÙBˆØØ[Ø[YˆYˆ˜]]™SX\šÙ\“[ÙHOHœØØ[Hˆ[‚ˆØ[YH˜[YH
+ˆ˜]]™SX\šÙ\[Bˆ[ÙZYˆ˜]]™SX\šÙ\“[ÙHOHšYWŞ™\›Èˆ[‚ˆØ[YH˜]]™SX\šÙ\[HHŒH[™Üˆ˜[YBˆ[™ˆ˜]]™SX\šÙ\•Ø[YHØ[YˆYˆØ[YHš[[™X]˜XœÊ˜[YHHØ[Y
+HˆŒH[‚ˆYˆÙ]˜]]™SX\šÙ\”ØØ[JZ[š[X\Ø[Y
+H[‚ˆ˜]]™SX\šÙ\”ØØ[HHØ[Yˆ˜]]™SX\šÙ\]Y]]HÙ][YJ
+Bˆ[™ˆ[™ˆ[™
+BˆYˆÚÈ[ˆ˜]]™SX\šÙ\’ÛÚÙYHYH[™™[™‚›ØØ[[˜İ[Ûˆ™\İÜ™S˜]]™SX\šÙ\œÊZ[š[X\
+BˆKHYˆ[ˆİ™\œšYHØ\È™]™\ˆ\YY\™H\È›İ[™ÈÈ]˜XÚËˆÛX\‚ˆKH[[YYX][H˜]\ˆ[ˆ][\[™ÈÈœ™\İÜ™Hˆ[ˆ\Üİ[YYØØ[K‚ˆYˆ˜]]™SX\šÙ\”ØØ[HOHš[[‚ˆ˜]]™SX\šÙ\•Ø[YHš[ˆ˜]]™SX\šÙ\“[ÙHHš[ˆ˜]]™SX\šÙ\[HHBˆ˜]]™SX\šÙ\”™\İÜ™T[™[™ÈH˜[ÙBˆ˜]]™SX\šÙ\]Y]]Hˆ™]\›ˆYBˆ[™‚ˆKHİÜÛÛ\ÜÚ[™È[[YYX][K]™[ˆYˆHÜİÙ]\ˆ\È[\Ü˜\š[BˆKH[˜]˜Z[X›KˆH]\ˆÜİÙ]XÛÛ”ØØ[HØ[]\İ™XÛÛYHH™]ÈÜİˆKH˜\Ù[[™H[œİXYÙˆ™Z[™È˜[œÙ›Ü›YYHHÛ˜YH[ÙK‚ˆ˜]]™SX\šÙ\•Ø[YHš[ˆ˜]]™SX\šÙ\“[ÙHHš[ˆ˜]]™SX\šÙ\[HHBˆØØ[™\İÜ™HHØ\\™S˜]]™SX\šÙ\’ÜİØØ[JZ[š[X\
+BˆYˆ™\İÜ™HOHš[[‚ˆKHÙH™]™\ˆİ™\Üš]H[ˆ[šÛ›İÛˆÜİØØ[KˆÙY\™]Z[™È[ˆØ\ÙHBˆKHÛY[]\ˆ^ÜÙ\ÈHÙ]\ˆÜˆHÜİØ[ÈÙ]XÛÛ”ØØ[K‚ˆ˜]]™SX\šÙ\”™\İÜ™T[™[™ÈHYBˆ™]\›ˆ˜[ÙBˆ[™‚ˆYˆX]˜XœÊ˜]]™SX\šÙ\”ØØ[HH™\İÜ™JHˆŒH[™›İÙ]˜]]™SX\šÙ\”ØØ[JZ[š[X\™\İÜ™JH[‚ˆKH˜Z[YÙ]\œÈ\™H˜[œÚY[\š[™ÈÛY[™XZ[ËÛØÚÙİÛ‹ˆÂˆKH›İÜÙHHÜšYÚ[˜[ÜİØØ[NÈH™^\]HÚ[™]K‚ˆ˜]]™SX\šÙ\”™\İÜ™T[™[™ÈHYBˆ™]\›ˆ˜[ÙBˆ[™‚ˆ˜]]™SX\šÙ\”ØØ[HHš[ˆKHÙY\H\İ]]Üš]]]™HÜİ˜\Ù[[™KˆÛÛYH™]Z[Z[È^ÜÙBˆKHÙ]XÛÛ”ØØ[HÚ]İ]HX]Ú[™ÈÙ]\‹ÛÈ›Ü™Ù][™ÈH˜[YH[››İ[˜ÙYˆKHHHÜİÛİ[XZÙHHØY™H^\š[Y[[[Ù\È[˜]˜Z[X›HYØZ[ˆÛ‚ˆKHH™\H™^ÙY\[[ÙH\]KˆH]\ˆÜİÙ]\ˆ™Yœ™\Ú\È\È˜[YBˆKH›İYÚÛÚÓ˜]]™SX\šÙ\œË‚ˆ˜]]™SX\šÙ\”™\İÜ™T[™[™ÈH˜[ÙBˆ˜]]™SX\šÙ\]Y]]Hˆ™]\›ˆYB™[™‚›ØØ[[˜İ[Ûˆ\]S˜]]™SX\šÙ\œÊZ[š[X\[K[ÙJBˆYˆ[ÙHHšYWŞ™\›Èˆ[™[ÙHHœØØ[Hˆ[‚ˆ™\İÜ™S˜]]™SX\šÙ\œÊZ[š[X\
+Bˆ™]\›‚ˆ[™ˆÛÚÓ˜]]™SX\šÙ\œÊZ[š[X\
+BˆØØ[ÜİØØ[HHØ\\™S˜]]™SX\šÙ\’ÜİØØ[JZ[š[X\YJBˆYˆÜİØØ[HOHš[[‚ˆKHHÙ]\ˆ]Ù[ˆ\È[˜]˜Z[X›HÜˆ™Z™XİYˆÙY\H™\]Y\İYˆKH[ÙH™XÛÜ™Y]È›İÛZ[H]Hš\İX[Ú[™ÙHØ\È\YY‚ˆ˜]]™SX\šÙ\“[ÙHH[ÙBˆ˜]]™SX\šÙ\[HH[Bˆ˜]]™SX\šÙ\•Ø[YHš[ˆ™]\›‚ˆ[™ˆ˜]]™SX\šÙ\“[ÙHH[ÙBˆ˜]]™SX\šÙ\[HH[Bˆ˜]]™SX\šÙ\”™\İÜ™T[™[™ÈH˜[ÙBˆØØ[Ø[YH[ÙHOHœØØ[Hˆ[™
+ÜİØØ[H
+ˆ[JBˆÜˆ
+[HHŒH[™ÜˆÜİØØ[JBˆ˜]]™SX\šÙ\•Ø[YHØ[YˆØØ[›İÈHÙ][YJ
+BˆKH›^˜\™	ÜÈ˜]]™H›\ÛÛ\ÜÚ]ÜˆØ[ˆ™XZ[Ú]İ]XZÚ[™ÈHXBˆKHÙ]XÛÛ”ØØ[HØ[ˆ™X\ÜÙ\]HİÈ˜]HÛÈH™XZ[]Y\İÜÙ\šXÙK\[‚ˆKH^Y\ˆØ[››İ™[XZ[ˆš\ÚX›HÚ[HHZ[š[X\\È[H˜YY‚ˆØØ[]Y]YHHØ[YHŒH[™›İÈH˜]]™SX\šÙ\]Y]]HŒBˆYˆ]Y]YHÜˆ˜]]™SX\šÙ\”ØØ[HOHš[ÜˆX]˜XœÊ˜]]™SX\šÙ\”ØØ[HHØ[Y
+HˆŒH[‚ˆYˆÙ]˜]]™SX\šÙ\”ØØ[JZ[š[X\Ø[Y
+H[‚ˆ˜]]™SX\šÙ\”ØØ[HHØ[Yˆ˜]]™SX\šÙ\]Y]]H›İÂˆ[™ˆ[™™[™‚™[˜İ[ÛˆœÎ‘Ù]Z[š[X\˜]]™SX\šÙ\]˜Z[Xš[]J[ÙJBˆØØ[Z[š[X\HÑË“Z[š[X\ˆYˆ›İZ[š[X\[ˆ™]\›ˆ˜[ÙK•H˜]]™HZ[š[X\\È›İ]˜Z[X›Kˆˆ[™ˆYˆ›İ\Ó˜]]™SX\šÙ\”Ù]\ŠZ[š[X\
+H[‚ˆ™]\›ˆ˜[ÙK•\ÈÛÕÈZ[Ù\È›İ^ÜÙH˜]]™HX\šÙ\ˆØØ[[™Ëˆ‚ˆ[™ˆKH[œİ[H™XY[Û›HÜİZÛÚÈ]™[ˆÚ[HX]š[™ÈX\šÙ\œÈ[˜Ú[™ÙYˆY‚ˆKH›^˜\™ÜˆHİÛš[™ÈRH]\ˆ[››İ[˜Ù\ÈHØØ[K^\š[Y[[[Ù\ÂˆKHØ[ˆ™XÛÛYH]˜Z[X›HÚ]İ]İY\ÜÚ[™ÈÜˆ™\]Z\š[™ÈH™[ØY‚ˆÛÚÓ˜]]™SX\šÙ\œÊZ[š[X\
+BˆYˆØ\\™S˜]]™SX\šÙ\’ÜİØØ[JZ[š[X\
+HHš[[‚ˆYˆ˜]]™SX\šÙ\˜\Ù[[™P\Üİ[YY[‚ˆ™]\›ˆYK•\ÈÛÕÈZ[Ø[››İ™XYHİ\œ™[˜]]™HX\šÙ\ˆØØ[Kˆ™XØ]\ÙH[ˆ^\š[Y[[X\šÙ\ˆ[ÙH\ÈÙ[XİYœ˜[YHØ[Xš]\È\Ú[™ÈL	H\È]È™\İÜ˜][Ûˆ˜\Ù[[™H[[›^˜\™ÜˆHİÛš[™ÈRH[››İ[˜Ù\È[›İ\ˆ˜[YKˆ‚ˆ[™ˆ™]\›ˆYBˆ[™ˆØØ[›İHH•\ÈÛÕÈZ[Ø[››İ™XYHİ\œ™[˜]]™HX\šÙ\ˆØØ[KˆÚÛÜÚ[™È[ˆ^\š[Y[[X\šÙ\ˆ[ÙHÚ[^XÚ]H\ÙHL	H\È]È™\İÜ˜][Ûˆ˜\Ù[[™NÈX]™H[˜Ú[™ÙY™]™\ˆÜš]\È]ˆ‚ˆYˆ[ÙHOHšYWŞ™\›ÈˆÜˆ[ÙHOHœØØ[Hˆ[‚ˆØ\\™S˜]]™SX\šÙ\’ÜİØØ[JZ[š[X\YJBˆ[™ˆ™]\›ˆYK›İB™[™‚™[˜İ[ÛˆœÎ’\ÓZ[š[X\İXÚÔ[™[™ÕÛÜšÊ
+Bˆ™]\›ˆ˜]]™SX\šÙ\”™\İÜ™T[™[™ÈOHYHÜˆ˜]]™Tš[™Ô™\İÜ™T[™[™ÈOHYBˆÜˆØØ[ˆHš[Üˆ™^
+[™[™ÊHHš[™[™‚™[˜İ[ÛˆœÎ•\]SZ[š[X\İXÚÊ™\ØØ[ŠBˆ›ØÙ\ÜÔ[™[™Ê
+BˆØØ[Z[š[X\HÑË“Z[š[X\ˆØØ[Xİ]™HHÙ[‹œ[[YH[™Ù[‹œ[[YK˜Xİ]™H[™Ù[‹œ[[YK˜Xİ]™K›Z[š[X\ˆØØ[ÛÛ›ÛYHÙ[‹œ[[YH[™Ù[‹œ[[YK™œ˜[YPRQ[™Ù[‹œ[[YK™œ˜[YPRQ›Z[š[X\OHZ[š[X\ˆØØ[™^][\Y\ˆHXİ]™H[™Xİ]™K˜[BˆYˆ›İZ[š[X\Üˆ›İÛÛ›ÛYÜˆ›İ˜[Y[J™^][\Y\ŠH[‚ˆØØ[œ˜[Y\ÈHßBˆ›Üˆœ˜[YH[ˆZ\œÊİÛ™Y
+HÈœ˜[Y\ÖÈÙœ˜[Y\È
+ÈWHHœ˜[YH[™ˆ›ÜˆËœ˜[YH[ˆ\Z\œÊœ˜[Y\ÊHÈ™[X\ÙJœ˜[YJH[™ˆ][\Y\ˆHBˆØØ[ˆHš[ˆ™\İÜ™S˜]]™SX\šÙ\œÊZ[š[X\ÜˆÑË“Z[š[X\
+Bˆ™\İÜ™S˜]]™SX\šÙ\”š[™ÜÊZ[š[X\ÜˆÑË“Z[š[X\
+Bˆ™]\›‚ˆ[™ˆØØ[Ù][™ÜÈHÙ[‹‘Ù]\™Ù]Ù][™ÜÈ[™Ù[‘Ù]\™Ù]Ù][™ÜÊ›Z[š[X\ŠBˆØØ[X\šÙ\“[ÙHHÙ][™ÜÈ[™Ù][™ÜË›˜]]™SX\šÙ\“[ÙHÜˆšÙY\‚ˆ\]S˜]]™SX\šÙ\œÊZ[š[X\™^][\Y\‹X\šÙ\“[ÙJBˆ\]S˜]]™SX\šÙ\”š[™ÜÊZ[š[X\™^][\Y\‹X\šÙ\“[ÙJBˆØØ[Ú[™ÙYHX]˜XœÊ][\Y\ˆH™^][\Y\ŠHˆŒBˆ][\Y\ˆH™^][\Y\‚ˆYˆ™\ØØ[ˆ[™›İØØ[ˆ[ˆ™YÚ[”ØØ[ŠZ[š[X\
+H[™ˆYˆ™\ØØ[ˆ[‚ˆKHHURH›[İ]\ÈH[K^XİY\\ˆ[™Úİ[™XÛÛYHBˆKHÚ[™[X]XÈ^[\[Ûˆ[[YYX][NÈ\ØÙ[™[[ˆ\ØÛİ™\HØ[ˆÙY\ˆKH›ÙÜ™\ÜÚ[™È[˜Ü™[Y[[HÚ]İ][^Z[™ÈHš\ÚX›H]ÛˆİXÚË‚ˆØØ[Ù[X[XÈHßBˆYÙ[X[XÓZ[š[X\œ˜[Y\ÊÙ[X[XËZ[š[X\
+Bˆ›Üˆœ˜[YH[ˆZ\œÊÙ[X[XÊHÂˆØØ[İ\’QHÙ[‹œ[[YK›X[˜YÙYQQœ˜[YH[™Ù[‹œ[[YK›X[˜YÙYQQœ˜[YVÙœ˜[YWBˆYˆ›İİ\’QÜˆİ\’QOH›Z[š[X\ˆ[ˆÛZ[Jœ˜[YJH[™ˆ[™ˆ[™ˆYˆØØ[ˆ[‚ˆØØ[\ØÛİ™\™YHÛÛ[YTØØ[ŠZ[š[X\
+BˆYˆ\ØÛİ™\™Y[‚ˆØØ[İ\œ™[HßBˆ›Üˆœ˜[YH[ˆZ\œÊ\ØÛİ™\™Y
+HÂˆØØ[İ\’QHÙ[‹œ[[YK›X[˜YÙYQQœ˜[YH[™Ù[‹œ[[YK›X[˜YÙYQQœ˜[YVÙœ˜[YWBˆYˆ›İİ\’QÜˆİ\’QOH›Z[š[X\ˆ[‚ˆİ\œ™[Ùœ˜[YWHHYBˆÛZ[Jœ˜[YJBˆ[™ˆ[™ˆØØ[™]\™YHßBˆ›Üˆœ˜[YH[ˆZ\œÊİÛ™Y
+HÈYˆ›İİ\œ™[Ùœ˜[YWH[ˆ™]\™YÈÜ™]\™Y
+ÈWHHœ˜[YH[™[™ˆ›ÜˆËœ˜[YH[ˆ\Z\œÊ™]\™Y
+HÈ™[X\ÙJœ˜[YJH[™ˆ[™ˆ[™ˆKH\™Ù]İÛ™\œÚ\Ø[ˆÚ[™ÙHÚ]İ]Z[š[X\ÜÛÙŞHÚ[™Ú[™Ëˆ™]™\‚ˆKHÛÛ\ÜÙHHİXÚÈ][\Y\ˆÛÈHœ˜[YH›İÈÛÛ›ÛY^XÚ]HBˆKH[›İ\ˆš[Üš]H˜Y\ˆ\™Ù]‚ˆØØ[ÛÛ™›XİYHßBˆ›Üˆœ˜[YH[ˆZ\œÊİÛ™Y
+HÂˆØØ[İ\’QHÙ[‹œ[[YK›X[˜YÙYQQœ˜[YH[™Ù[‹œ[[YK›X[˜YÙYQQœ˜[YVÙœ˜[YWBˆYˆİ\’Q[™İ\’QH›Z[š[X\ˆ[ˆÛÛ™›XİYÈØÛÛ™›XİY
+ÈWHHœ˜[YH[™ˆ[™ˆ›ÜˆËœ˜[YH[ˆ\Z\œÊÛÛ™›XİY
+HÈ™[X\ÙJœ˜[YJH[™ˆ›Üˆœ˜[YH[ˆZ\œÊİÛ™Y
+HÂˆØØ[\İH\YY[VÙœ˜[YWBˆYˆ›İÛÚÙYÙœ˜[YWH[‚ˆØØ[]™HH[Jœ˜[YJBˆYˆ]™HHš[[™\İHš[[™X]˜XœÊ]™HH\İ
+HˆŒH[ˆÜİ[VÙœ˜[YWHH]™H[™ˆ[™ˆØØ[Ø[YHÜİ[VÙœ˜[YWH[™Üİ[VÙœ˜[YWH
+ˆ][\Y\‚ˆYˆØ[Y[™
+Ú[™ÙYÜˆ\İOHš[ÜˆX]˜XœÊØ[YH\İ
+HˆŒJH[ˆ\Jœ˜[YJH[™ˆ[™™[™‚™[˜İ[ÛˆœÎ’\ÓZ[š[X\İXÚÑœ˜[YJœ˜[YJBˆ™]\›ˆœ˜[YH[™İÛ™YÙœ˜[YWHOHYHÜˆ˜[ÙB™[™‚™[˜İ[ÛˆœÎ“Z[š[X\İXÚĞÛÛZ[œĞİ\œÛÜŠ
+Bˆ›Üˆœ˜[YH[ˆZ\œÊİÛ™Y
+HÂˆYˆ›İİ™\‘^ÛYYÙœ˜[YWH[™Ù[‘œ˜[YPÛÛZ[œĞİ\œÛÜŠœ˜[YJH[ˆ™]\›ˆYH[™ˆ[™ˆ™]\›ˆ˜[ÙB™[™

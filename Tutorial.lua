@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 local ADDON, ns = ...
 
 -- A self-contained coach layer. It teaches the real editor through one
@@ -273,338 +270,4 @@ local function EnsureTutorialFrame()
         end
     end)
     ns.TutorialPracticeFrame = frame
-    return frame
-end
-
-local function SeedTutorialStationaryRule(tutorial)
-    local settings = tutorial and tutorial.targetID and ns.GetTargetSettings and ns:GetTargetSettings(tutorial.targetID)
-    if not settings or tutorial.stationarySeeded then return settings ~= nil end
-    settings.reactions = { { id = ns:NextReactionID(), condition = "stationary", opacity = 0.30 } }
-    -- The contrast is intentional: standing still matches Stationary at 30%,
-    -- while taking a step falls through to Otherwise at a very visible 100%.
-    settings.atRest, settings.fadeDuration, settings.fadeDelay = 1, 0.12, 0
-    settings.cinematicMode = nil
-    tutorial.stationarySeeded = true
-    ns:InvalidateTargetTransition(tutorial.targetID)
-    ns:RenderOptions()
-    return true
-end
-
-local function StartTutorialTarget(tutorial, resume)
-    local panel = ns.Options
-    tutorial.previousSelected = panel and panel.selected or nil
-    tutorial.previousManagedOnly = panel and panel.managedOnly or false
-    tutorial.previousQuery = panel and panel.targetQuery or ""
-    local frame = EnsureTutorialFrame()
-    tutorial.frame = frame
-    local id, reason = ns:RegisterDiscoveredFrame(frame, "Tutorial Frame", true)
-    if not id then return false, reason end
-    tutorial.targetID = id
-    if panel then
-        panel.managedOnly, panel.targetQuery = false, ""
-        if panel.targetFilter then panel.targetFilter:SetText("") end
-        -- Step 3 onward needs the real editor to be looking at the temporary
-        -- target. Step 2 deliberately leaves selection to the player.
-        if resume and tutorial.step >= 3 then panel.selected = id end
-    end
-    if resume and tutorial.step >= 4 then
-        ns:AddTarget(id)
-        SeedTutorialStationaryRule(tutorial)
-        tutorial.hoveredBeforePriority = tutorial.step > 6
-        tutorial.hoveredAfterPriority = tutorial.step > 6
-        if tutorial.step >= 6 then
-            local settings = ns:GetTargetSettings(id)
-            settings.reactions[#settings.reactions + 1] = { id = ns:NextReactionID(), condition = "mouseover", opacity = 1 }
-            if tutorial.step >= 7 then settings.reactions[1], settings.reactions[2] = settings.reactions[2], settings.reactions[1] end
-            if tutorial.step >= 8 then settings.atRest = 0.12 end
-            ns:InvalidateTargetTransition(id)
-        end
-    end
-    ns:RenderOptions()
-    return true
-end
-
-local function CleanupTutorialTarget(tutorial)
-    if not tutorial then return end
-    local id, frame = tutorial.targetID, tutorial.frame
-    if id and ns.CanForgetCustomTarget and ns:CanForgetCustomTarget(id) then ns:ForgetCustomTarget(id) end
-    if frame then frame:SetAlpha(1); frame:Hide() end
-    if ns.Options then
-        ns.Options.managedOnly = tutorial.previousManagedOnly == true
-        ns.Options.targetQuery = tutorial.previousQuery or ""
-        if ns.Options.targetFilter then ns.Options.targetFilter:SetText(ns.Options.targetQuery) end
-        if tutorial.previousSelected and ns.TargetByID[tutorial.previousSelected] then ns.Options.selected = tutorial.previousSelected end
-    end
-    if ns.RenderOptions then ns:RenderOptions() end
-end
-
-local function CreateHelp()
-    if ns.HelpCenter then return ns.HelpCenter end
-    local help = CreateFrame("Frame", "FrameGambitHelpCenter", UIParent, "BackdropTemplate")
-    help:SetSize(760, 555)
-    local function FitToScreen()
-        local uiWidth, uiHeight = UIParent:GetSize()
-        help:SetScale(math.max(0.50, math.min(1, (uiWidth - 30) / 760, (uiHeight - 30) / 555)))
-    end
-    FitToScreen()
-    help:SetPoint("CENTER")
-    help:SetFrameStrata("FULLSCREEN_DIALOG"); help:SetFrameLevel(850); help:SetToplevel(true)
-    help:SetMovable(true); help:SetClampedToScreen(true); help:EnableMouse(true)
-    Backdrop(help, C.panel, C.accent); help:Hide()
-    CloseButton(help, function() ns:CloseHelp() end):SetPoint("TOPRIGHT", -8, -8)
-    local title = Text(help, "GameFontNormalHuge", "Help & tutorial", C.accent); title:SetPoint("TOPLEFT", 20, -18)
-    local subtitle = Text(help, BODY, "Learn the flow in a minute, or open any topic when you need it.", C.muted); subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -5)
-    local drag = CreateFrame("Frame", nil, help)
-    drag:SetPoint("TOPLEFT"); drag:SetPoint("TOPRIGHT"); drag:SetHeight(58)
-    drag:EnableMouse(true); drag:RegisterForDrag("LeftButton")
-    drag:SetScript("OnDragStart", function() help:StartMoving() end)
-    drag:SetScript("OnDragStop", function() help:StopMovingOrSizing() end)
-
-    local topics = {
-        { title = "Start here", summary = "The quick loop", body = "Pick a frame, add a reaction, then set Otherwise. That is the complete Frame Gambit loop." },
-        { title = "Gambit priority", summary = "First matching reaction wins", body = "Frame Gambit checks reactions from top to bottom. The first matching reaction decides the frame's opacity." },
-        { title = "Relationships", summary = "Let related UI work together", body = "Groups reveal together. Links have a source. Visibility children can follow a parent." },
-        { title = "Cinematic", summary = "A separate calm scene", body = "Cinematic is a questing profile that leaves your normal profile alone. Enter it from the orange Cinematic button, then edit its frames with the familiar editor. Its top strip holds the mode toggle, black bars, and shortcut." },
-        { title = "Safety", summary = "Presentation, not control", body = "Frame Gambit layers final opacity only. It does not move, restyle, reparent, show, hide, or change secure controls owned by Blizzard or another addon." },
-        { title = "Troubleshooting", summary = "Confirm the intended frame", body = "Use Discover visible UI, select the right root, then use Frame outline or Peek to confirm it. These checks do not change the frame's layout or settings." },
-    }
-    local rail = CreateFrame("Frame", nil, help, "BackdropTemplate")
-    rail:SetPoint("TOPLEFT", 18, -76); rail:SetPoint("BOTTOMLEFT", 18, 62); rail:SetWidth(190); Backdrop(rail, C.cardAlt, C.border)
-    local page = CreateFrame("Frame", nil, help, "BackdropTemplate")
-    page:SetPoint("TOPLEFT", rail, "TOPRIGHT", 12, 0); page:SetPoint("BOTTOMRIGHT", -18, 62); Backdrop(page, C.card, C.border)
-    help.topicButtons, help.page = {}, page
-    page.title = Text(page, "GameFontNormalHuge", "", C.teal); page.title:SetPoint("TOPLEFT", 22, -22)
-    page.summary = Text(page, "GameFontHighlight", "", C.muted); page.summary:SetPoint("TOPLEFT", page.title, "BOTTOMLEFT", 0, -6)
-    page.rule = page:CreateTexture(nil, "ARTWORK"); page.rule:SetTexture(WHITE); page.rule:SetPoint("TOPLEFT", page.summary, "BOTTOMLEFT", 0, -14); page.rule:SetPoint("RIGHT", page, "RIGHT", -22, 0); page.rule:SetHeight(1); page.rule:SetVertexColor(unpack(C.border))
-    page.body = Text(page, "GameFontHighlight", "", { 0.84, 0.85, 0.91, 1 }); page.body:SetPoint("TOPLEFT", page.rule, "BOTTOMLEFT", 0, -20); page.body:SetPoint("BOTTOMRIGHT", -22, 22); page.body:SetJustifyH("LEFT"); page.body:SetJustifyV("TOP"); page.body:SetWordWrap(true); page.body:SetSpacing(3)
-    function help:ShowTopic(index)
-        self.topic = index
-        local topic = topics[index]
-        page.title:SetText(topic.title); page.summary:SetText(topic.summary); page.body:SetText(topic.body)
-        for buttonIndex, button in ipairs(self.topicButtons) do
-            local selected = buttonIndex == index
-            button._primary = false
-            button:SetBackdropColor(unpack(selected and { 0.08, 0.22, 0.20, 1 } or C.cardAlt))
-            button:SetBackdropBorderColor(unpack(selected and C.teal or C.border))
-            button:GetFontString():SetTextColor(unpack(selected and C.teal or C.accent))
-        end
-    end
-    for index, topic in ipairs(topics) do
-        local topicIndex = index
-        local button = Button(rail, topic.title, 174, function() help:ShowTopic(topicIndex) end)
-        button:SetHeight(42); button:SetPoint("TOPLEFT", 8, -8 - (index - 1) * 47)
-        button:GetFontString():ClearAllPoints(); button:GetFontString():SetPoint("LEFT", 10, 0); button:GetFontString():SetJustifyH("LEFT")
-        button:HookScript("OnLeave", function(self)
-            if help.topic == topicIndex then
-                self:SetBackdropColor(0.08, 0.22, 0.20, 1); self:SetBackdropBorderColor(unpack(C.teal))
-            end
-        end)
-        help.topicButtons[index] = button
-    end
-    local start = Button(help, "Start guided tutorial", 190, function() help:Hide(); ns:StartTutorial() end, true)
-    start:SetPoint("BOTTOMLEFT", 18, 18); help.start = start
-    local restart = Button(help, "Restart tutorial", 125, function() help:Hide(); ns:StartTutorial(1) end)
-    restart:SetPoint("LEFT", start, "RIGHT", 8, 0); help.restart = restart
-    local close = Button(help, "Close", 90, function() help:Hide() end)
-    close:SetPoint("BOTTOMRIGHT", -18, 18)
-    help:SetScript("OnHide", function()
-        help:StopMovingOrSizing()
-        ClearOutline()
-    end)
-    help:SetScript("OnShow", function() FitToScreen(); help:Raise() end)
-    help:ShowTopic(1)
-    local displayEvents = CreateFrame("Frame")
-    displayEvents:RegisterEvent("DISPLAY_SIZE_CHANGED"); displayEvents:RegisterEvent("UI_SCALE_CHANGED")
-    displayEvents:SetScript("OnEvent", function() if help:IsShown() then FitToScreen() end end)
-    if UISpecialFrames then UISpecialFrames[#UISpecialFrames + 1] = help:GetName() end
-    ns.HelpCenter = help
-    return help
-end
-
-local function CreateTutorial()
-    if ns.TutorialCard then return ns.TutorialCard end
-    local card = CreateFrame("Frame", "FrameGambitTutorial", UIParent, "BackdropTemplate")
-    -- The coach card must remain readable after the player clicks a real
-    -- editor control. Keep it above the options panel; RefreshTutorial also
-    -- raises it after every live-editor refresh.
-    card:SetSize(390, 220); card:SetFrameStrata("FULLSCREEN_DIALOG"); card:SetFrameLevel(950); card:SetToplevel(true); card:EnableMouse(true); card:SetClampedToScreen(true)
-    Backdrop(card, C.panel, C.teal); card:Hide()
-    local kicker = Text(card, BODY, "GUIDED TOUR", C.teal); kicker:SetPoint("TOPLEFT", 16, -14)
-    local title = Text(card, TITLE, "", C.accent); title:SetPoint("TOPLEFT", 16, -33); card.title = title
-    local body = Text(card, "GameFontHighlight", "", C.muted); body:SetPoint("TOPLEFT", 16, -65); body:SetPoint("TOPRIGHT", -16, -65); body:SetJustifyH("LEFT"); body:SetJustifyV("TOP"); body:SetWordWrap(true); card.body = body
-    local progress = Text(card, BODY, "", C.muted); progress:SetPoint("BOTTOMLEFT", 16, 15); card.progress = progress
-    card.back = Button(card, "Back", 58, function() ns.Tutorial.step = math.max(1, ns.Tutorial.step - 1); ns:RefreshTutorial() end)
-    card.back:SetPoint("BOTTOMRIGHT", -157, 12)
-    card.next = Button(card, "Next", 66, function()
-        local tutorial = ns.Tutorial
-        if not tutorial or tutorial.paused then return end
-        local ready, message = CanAdvance(tutorial)
-        if not ready then
-            card.validation:SetText(message or "Try this step first.")
-            return
-        end
-        if tutorial.step >= #STEPS then ns:CancelTutorial("complete"); return end
-        if tutorial.step == 3 then SeedTutorialStationaryRule(tutorial) end
-        tutorial.step = tutorial.step + 1; ns:RefreshTutorial()
-    end, true)
-    card.next:SetPoint("LEFT", card.back, "RIGHT", 6, 0)
-    card.skip = Button(card, "Skip", 48, function() ns:CancelTutorial("skipped") end)
-    card.skip:SetPoint("LEFT", card.next, "RIGHT", 6, 0)
-    CloseButton(card, function() ns:CancelTutorial("closed") end):SetPoint("TOPRIGHT", -5, -5)
-
-    local validation = Text(card, BODY, "", C.amber)
-    validation:SetPoint("BOTTOMLEFT", 16, 39); validation:SetPoint("BOTTOMRIGHT", -16, 39)
-    validation:SetJustifyH("LEFT"); card.validation = validation
-
-    card:SetScript("OnHide", function()
-        -- Escape uses UISpecialFrames and hides the card directly.
-        if ns.Tutorial and not ns.Tutorial.closing and not ns.Tutorial.hidingForCombat then ns:CancelTutorial("closed") end
-    end)
-    table.insert(UISpecialFrames, "FrameGambitTutorial")
-    ns.TutorialCard = card
-    return card
-end
-
-function ns:OpenHelp()
-    if IsCombat() then Notice("Open Help outside combat.", C.amber); return end
-    -- Help and the coach card are mutually exclusive. Save the live step
-    -- before opening Help so Resume always describes the real tour state.
-    if ns.Tutorial then ns:CancelTutorial("help_opened") end
-    local help = CreateHelp()
-    local savedStep, completed = GetState()
-    if completed then
-        help.start:GetFontString():SetText("Replay guided tutorial")
-        help.restart:Hide()
-    elseif savedStep > 1 then
-        help.start:GetFontString():SetText("Resume guided tutorial")
-        help.restart:Show()
-    else
-        help.start:GetFontString():SetText("Start guided tutorial")
-        help.restart:Hide()
-    end
-    help:ShowTopic(1)
-    help:Show()
-    help:Raise()
-end
-
-function ns:ToggleHelp()
-    if ns.HelpCenter and ns.HelpCenter:IsShown() then
-        ns:CloseHelp()
-        return
-    end
-    ns:OpenHelp()
-end
-
-function ns:CloseHelp()
-    if ns.HelpCenter then ns.HelpCenter:Hide() end
-end
-
-function ns:StartTutorial(requestedStep)
-    if IsCombat() then Notice("The guided tutorial starts outside combat.", C.amber); return false end
-    local panel = EnsureOptions()
-    if not panel then return false end
-    ns:CloseHelp()
-    local savedStep, completed = GetState()
-    local step = tonumber(requestedStep) or (completed and 1 or savedStep)
-    step = math.max(1, math.min(#STEPS, step))
-    ns.Tutorial = {
-        step = step,
-        paused = false,
-        wasCompleted = completed == true,
-    }
-    local started, reason = StartTutorialTarget(ns.Tutorial, step > 1)
-    if not started then
-        local tutorial = ns.Tutorial
-        ns.Tutorial = nil
-        CleanupTutorialTarget(tutorial)
-        Notice(reason or "The temporary Tutorial Frame could not be created.", C.amber)
-        return false
-    end
-    local card = CreateTutorial()
-    card:Show(); ns:RefreshTutorial()
-    return true
-end
-
-function ns:CancelTutorial(reason)
-    local tutorial = ns.Tutorial
-    if not tutorial then return end
-    local completed = reason == "complete" or tutorial.wasCompleted == true
-    SaveState(completed and #STEPS or tutorial.step or 1, completed)
-    ClearOutline(); ClearSpotlight()
-    tutorial.closing = true
-    if ns.TutorialCard then ns.TutorialCard:Hide() end
-    ns.Tutorial = nil
-    CleanupTutorialTarget(tutorial)
-    if ns.Options and ns.Options.helpButton and ns.Options.helpButton.tutorialDot then
-        ns.Options.helpButton.tutorialDot:SetShown(not completed)
-    end
-    if completed then Notice("Tutorial complete. You can restart it any time from Help.", C.teal) end
-end
-
-function ns:RefreshTutorial()
-    local tutorial, card = ns.Tutorial, ns.TutorialCard
-    if not tutorial or not card or not card:IsShown() then return end
-    if IsCombat() then ns:OnTutorialCombatStateChanged(true); return end
-    local step = STEPS[tutorial.step] or STEPS[1]
-    card.title:SetText(step.title); card.body:SetText(step.body)
-    card.validation:SetText("")
-    card.progress:SetText("Step " .. tutorial.step .. " of " .. #STEPS)
-    card.back:SetShown(tutorial.step > 1); card.next:GetFontString():SetText(step.finish and "Finish" or "Next")
-    card:SetHeight(220)
-    local target = FindControl(step.focus)
-    Highlight(target); Spotlight(target)
-    -- Put the card beside the highlighted target whenever there is room; the
-    -- editor stays clickable and the explanation never sits on its target.
-    card:SetScale(1)
-    card:ClearAllPoints()
-    local panel = ns.Options
-    local compact = UIParent:GetWidth() < 1000 or UIParent:GetHeight() < 650
-        or (panel and (panel:GetWidth() <= 800 or panel:GetHeight() <= 540))
-    if compact then
-        -- On a small viewport there is no honest way to fit the card beside a
-        -- large editor pane. Dock it compactly and remove the competing box.
-        ClearOutline(); ClearSpotlight()
-        card:SetScale(0.88)
-        card:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -14, 14)
-        card:Raise()
-        return
-    end
-    -- A normal editor leaves a generous column to its left on wide screens.
-    -- Docking the explanation there keeps it visible *and* prevents it from
-    -- covering the real target row or button the player must click next.
-    local panelLeft
-    if panel and ns.GetUsableFrameRect then panelLeft = ns:GetUsableFrameRect(panel) end
-    if panelLeft and panelLeft >= 422 then
-        card:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 18, 18)
-        card:Raise()
-        return
-    end
-    if SafeShown(target) then
-        local left, bottom, width, height
-        if ns.GetUsableFrameRect then
-            left, bottom, width, height = ns:GetUsableFrameRect(target)
-        end
-        if left and bottom and width and height and left + width + 406 < UIParent:GetWidth() then
-            card:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left + width + 12, bottom + height)
-        elseif left and bottom and width and height and left - 406 > 0 then
-            card:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", left - 12, bottom + height)
-        else
-            card:SetPoint("CENTER", UIParent, "CENTER", 0, -UIParent:GetHeight() * 0.24)
-        end
-    else
-        card:SetPoint("CENTER", UIParent, "CENTER", 0, -UIParent:GetHeight() * 0.24)
-    end
-    card:Raise()
-end
-
-function ns:OnTutorialCombatStateChanged(inCombat)
-    local tutorial, card = ns.Tutorial, ns.TutorialCard
-    if not tutorial or not card then return end
-    if inCombat then
-        tutorial.paused = true; tutorial.hidingForCombat = true; ClearOutline(); ClearSpotlight()
-        card:Hide()
-    elseif tutorial.paused then
-        tutorial.paused = false; tutorial.hidingForCombat = false; card:Show(); card.next:Show(); card.skip:GetFontString():SetText("Skip"); ns:RefreshTutorial()
-    end
-end
-
+    return fra×M´¶‰žËkºwµçp¹ÁÉ•Ù¥½ÕÍM•±•Ñ••¹(€€€•¹(€€€¥˜¹Ì¹I•¹‘•É=ÁÑ¥½¹ÌÑ¡•¸¹ÌéI•¹‘•É=ÁÑ¥½¹Ì ¤•¹)•¹()±½…°™Õ¹Ñ¥½¸É•…Ñ•!•±À ¤(€€€¥˜¹Ì¹!•±Á•¹Ñ•ÈÑ¡•¸É•ÑÕÉ¸¹Ì¹!•±Á•¹Ñ•È•¹(€€€±½…°¡•±À€ôÉ•…Ñ•É…µ” ‰É…µ”ˆ°€‰É…µ•…µ‰¥Ñ!•±Á•¹Ñ•Èˆ°U%A…É•¹Ð°€‰	…­‘É½ÁQ•µÁ±…Ñ”ˆ¤(€€€¡•±ÀéM•ÑM¥é” ÜØÀ°€ÔÔÔ¤(€€€±½…°™Õ¹Ñ¥½¸¥ÑQ½MÉ••¸ ¤(€€€€€€€±½…°Õ¥]¥‘Ñ °Õ¥!•¥¡Ð€ôU%A…É•¹Ðé•ÑM¥é” ¤(€€€€€€€¡•±ÀéM•ÑM…±”¡µ…Ñ ¹µ…à À¸ÔÀ°µ…Ñ ¹µ¥¸ Ä°€¡Õ¥]¥‘Ñ €´€ÌÀ¤€¼€ÜØÀ°€¡Õ¥!•¥¡Ð€´€ÌÀ¤€¼€ÔÔÔ¤¤¤(€€€•¹(€€€¥ÑQ½MÉ••¸ ¤(€€€¡•±ÀéM•ÑA½¥¹Ð ‰9QHˆ¤(€€€¡•±ÀéM•ÑÉ…µ•MÑÉ…Ñ„ ‰U11MI9}%1=ˆ¤ì¡•±ÀéM•ÑÉ…µ•1•Ù•° àÔÀ¤ì¡•±ÀéM•ÑQ½Á±•Ù•°¡ÑÉÕ”¤(€€€¡•±ÀéM•Ñ5½Ù…‰±”¡ÑÉÕ”¤ì¡•±ÀéM•Ñ±…µÁ•‘Q½MÉ••¸¡ÑÉÕ”¤ì¡•±Àé¹…‰±•5½ÕÍ”¡ÑÉÕ”¤(€€€	…­‘É½À¡¡•±À°¹Á…¹•°°¹…•¹Ð¤ì¡•±Àé!¥‘” ¤(€€€±½Í•	ÕÑÑ½¸¡¡•±À°™Õ¹Ñ¥½¸ ¤¹Ìé±½Í•!•±À ¤•¹¤éM•ÑA½¥¹Ð ‰Q=AI%!Pˆ°€´à°€´à¤(€€€±½…°Ñ¥Ñ±”€ôQ•áÐ¡¡•±À°€‰…µ•½¹Ñ9½Éµ…±!Õ”ˆ°€‰!•±À€˜ÑÕÑ½É¥…°ˆ°¹…•¹Ð¤ìÑ¥Ñ±”éM•ÑA½¥¹Ð ‰Q=A1Pˆ°€ÈÀ°€´Äà¤(€€€±½…°ÍÕ‰Ñ¥Ñ±”€ôQ•áÐ¡¡•±À°	=d°€‰1•…É¸Ñ¡”™±½Ü¥¸„µ¥¹ÕÑ”°½È½Á•¸…¹äÑ½Á¥ŒÝ¡•¸å½Ô¹••¥Ð¸ˆ°¹µÕÑ•¤ìÍÕ‰Ñ¥Ñ±”éM•ÑA½¥¹Ð ‰Q=A1Pˆ°Ñ¥Ñ±”°€‰	=QQ=51Pˆ°€À°€´Ô¤(€€€±½…°‘É…œ€ôÉ•…Ñ•É…µ” ‰É…µ”ˆ°¹¥°°¡•±À¤(€€€‘É…œéM•ÑA½¥¹Ð ‰Q=A1Pˆ¤ì‘É…œéM•ÑA½¥¹Ð ‰Q=AI%!Pˆ¤ì‘É…œéM•Ñ!•¥¡Ð Ôà¤(€€€‘É…œé¹…‰±•5½ÕÍ”¡ÑÉÕ”¤ì‘É…œéI•¥ÍÑ•É½ÉÉ…œ ‰1•™Ñ	ÕÑÑ½¸ˆ¤(€€€‘É…œéM•ÑMÉ¥ÁÐ ‰=¹É…MÑ…ÉÐˆ°™Õ¹Ñ¥½¸ ¤¡•±ÀéMÑ…ÉÑ5½Ù¥¹œ ¤•¹¤(€€€‘É…œéM•ÑMÉ¥ÁÐ ‰=¹É…MÑ½Àˆ°™Õ¹Ñ¥½¸ ¤¡•±ÀéMÑ½Á5½Ù¥¹=ÉM¥é¥¹œ ¤•¹¤((€€€±½…°Ñ½Á¥Ì€ôì(€€€€€€€ìÑ¥Ñ±”€ô€‰MÑ…ÉÐ¡•É”ˆ°ÍÕµµ…Éä€ô€‰Q¡”ÅÕ¥¬±½½Àˆ°‰½‘ä€ô€‰A¥¬„™É…µ”°…‘„É•…Ñ¥½¸°Ñ¡•¸Í•Ð=Ñ¡•ÉÝ¥Í”¸Q¡…Ð¥ÌÑ¡”½µÁ±•Ñ”É…µ”…µ‰¥Ð±½½À¸ˆô°(€€€€€€€ìÑ¥Ñ±”€ô€‰…µ‰¥ÐÁÉ¥½É¥Ñäˆ°ÍÕµµ…Éä€ô€‰¥ÉÍÐµ…Ñ¡¥¹œÉ•…Ñ¥½¸Ý¥¹Ìˆ°‰½‘ä€ô€‰É…µ”…µ‰¥Ð¡•­ÌÉ•…Ñ¥½¹Ì™É½´Ñ½ÀÑ¼‰½ÑÑ½´¸Q¡”™¥ÉÍÐµ…Ñ¡¥¹œÉ•…Ñ¥½¸‘•¥‘•ÌÑ¡”™É…µ”Ì½Á…¥Ñä¸ˆô°(€€€€€€€ìÑ¥Ñ±”€ô€‰I•±…Ñ¥½¹Í¡¥ÁÌˆ°ÍÕµµ…Éä€ô€‰1•ÐÉ•±…Ñ•U$Ý½É¬Ñ½•Ñ¡•Èˆ°‰½‘ä€ô€‰É½ÕÁÌÉ•Ù•…°Ñ½•Ñ¡•È¸1¥¹­Ì¡…Ù”„Í½ÕÉ”¸Y¥Í¥‰¥±¥Ñä¡¥±‘É•¸…¸™½±±½Ü„Á…É•¹Ð¸ˆô°(€€€€€€€ìÑ¥Ñ±”€ô€‰¥¹•µ…Ñ¥Œˆ°ÍÕµµ…Éä€ô€‰Í•Á…É…Ñ”…±´Í•¹”ˆ°‰½‘ä€ô€‰¥¹•µ…Ñ¥Œ¥Ì„ÅÕ•ÍÑ¥¹œÁÉ½™¥±”Ñ¡…Ð±•…Ù•Ìå½ÕÈ¹½Éµ…°ÁÉ½™¥±”…±½¹”¸¹Ñ•È¥Ð™É½´Ñ¡”½É…¹”¥¹•µ…Ñ¥Œ‰ÕÑÑ½¸°Ñ¡•¸•‘¥Ð¥ÑÌ™É…µ•ÌÝ¥Ñ Ñ¡”™…µ¥±¥…È•‘¥Ñ½È¸%ÑÌÑ½ÀÍÑÉ¥À¡½±‘ÌÑ¡”µ½‘”Ñ½±”°‰±…¬‰…ÉÌ°…¹Í¡½ÉÑÕÐ¸ˆô°(€€€€€€€ìÑ¥Ñ±”€ô€‰M…™•Ñäˆ°ÍÕµµ…Éä€ô€‰AÉ•Í•¹Ñ…Ñ¥½¸°¹½Ð½¹ÑÉ½°ˆ°‰½‘ä€ô€‰É…µ”…µ‰¥Ð±…å•ÉÌ™¥¹…°½Á…¥Ñä½¹±ä¸%Ð‘½•Ì¹½Ðµ½Ù”°É•ÍÑå±”°É•Á…É•¹Ð°Í¡½Ü°¡¥‘”°½È¡…¹”Í•ÕÉ”½¹ÑÉ½±Ì½Ý¹•‰ä	±¥éé…É½È…¹½Ñ¡•È…‘‘½¸¸ˆô°(€€€€€€€ìÑ¥Ñ±”€ô€‰QÉ½Õ‰±•Í¡½½Ñ¥¹œˆ°ÍÕµµ…Éä€ô€‰½¹™¥É´Ñ¡”¥¹Ñ•¹‘•™É…µ”ˆ°‰½‘ä€ô€‰UÍ”¥Í½Ù•ÈÙ¥Í¥‰±”U$°Í•±•ÐÑ¡”É¥¡ÐÉ½½Ð°Ñ¡•¸ÕÍ”É…µ”½ÕÑ±¥¹”½ÈA••¬Ñ¼½¹™¥É´¥Ð¸Q¡•Í”¡•­Ì‘¼¹½Ð¡…¹”Ñ¡”™É…µ”Ì±…å½ÕÐ½ÈÍ•ÑÑ¥¹Ì¸ˆô°(€€€ô(€€€±½…°É…¥°€ôÉ•…Ñ•É…µ” ‰É…µ”ˆ°¹¥°°¡•±À°€‰	…­‘É½ÁQ•µÁ±…Ñ”ˆ¤(€€€É…¥°éM•ÑA½¥¹Ð ‰Q=A1Pˆ°€Äà°€´ÜØ¤ìÉ…¥°éM•ÑA½¥¹Ð ‰	=QQ=51Pˆ°€Äà°€ØÈ¤ìÉ…¥°éM•Ñ]¥‘Ñ  ÄäÀ¤ì	…­‘É½À¡É…¥°°¹…É‘±Ð°¹‰½É‘•È¤(€€€±½…°Á…”€ôÉ•…Ñ•É…µ” ‰É…µ”ˆ°¹¥°°¡•±À°€‰	…­‘É½ÁQ•µÁ±…Ñ”ˆ¤(€€€Á…”éM•ÑA½¥¹Ð ‰Q=A1Pˆ°É…¥°°€‰Q=AI%!Pˆ°€ÄÈ°€À¤ìÁ…”éM•ÑA½¥¹Ð ‰	=QQ=5I%!Pˆ°€´Äà°€ØÈ¤ì	…­‘É½À¡Á…”°¹…É°¹‰½É‘•È¤(€€€¡•±À¹Ñ½Á¥	ÕÑÑ½¹Ì°¡•±À¹Á…”€ôíô°Á…”(€€€Á…”¹Ñ¥Ñ±”€ôQ•áÐ¡Á…”°€‰…µ•½¹Ñ9½Éµ…±!Õ”ˆ°€ˆˆ°¹Ñ•…°¤ìÁ…”¹Ñ¥Ñ±”éM•ÑA½¥¹Ð ‰Q=A1Pˆ°€ÈÈ°€´ÈÈ¤(€€€Á…”¹ÍÕµµ…Éä€ôQ•áÐ¡Á…”°€‰…µ•½¹Ñ!¥¡±¥¡Ðˆ°€ˆˆ°¹µÕÑ•¤ìÁ…”¹ÍÕµµ…ÉäéM•ÑA½¥¹Ð ‰Q=A1Pˆ°Á…”¹Ñ¥Ñ±”°€‰	=QQ=51Pˆ°€À°€´Ø¤(€€€Á…”¹ÉÕ±”€ôÁ…”éÉ•…Ñ•Q•áÑÕÉ”¡¹¥°°€‰IQ]=I,ˆ¤ìÁ…”¹ÉÕ±”éM•ÑQ•áÑÕÉ”¡]!%Q¤ìÁ…”¹ÉÕ±”éM•ÑA½¥¹Ð ‰Q=A1Pˆ°Á…”¹ÍÕµµ…Éä°€‰	=QQ=51Pˆ°€À°€´ÄÐ¤ìÁ…”¹ÉÕ±”éM•ÑA½¥¹Ð ‰I%!Pˆ°Á…”°€‰I%!Pˆ°€´ÈÈ°€À¤ìÁ…”¹ÉÕ±”éM•Ñ!•¥¡Ð Ä¤ìÁ…”¹ÉÕ±”éM•ÑY•ÉÑ•á½±½È¡Õ¹Á…¬¡¹‰½É‘•È¤¤(€€€Á…”¹‰½‘ä€ôQ•áÐ¡Á…”°€‰…µ•½¹Ñ!¥¡±¥¡Ðˆ°€ˆˆ°ì€À¸àÐ°€À¸àÔ°€À¸äÄ°€Äô¤ìÁ…”¹‰½‘äéM•ÑA½¥¹Ð ‰Q=A1Pˆ°Á…”¹ÉÕ±”°€‰	=QQ=51Pˆ°€À°€´ÈÀ¤ìÁ…”¹‰½‘äéM•ÑA½¥¹Ð ‰	=QQ=5I%!Pˆ°€´ÈÈ°€ÈÈ¤ìÁ…”¹‰½‘äéM•Ñ)ÕÍÑ¥™å  ‰1Pˆ¤ìÁ…”¹‰½‘äéM•Ñ)ÕÍÑ¥™åX ‰Q=@ˆ¤ìÁ…”¹‰½‘äéM•Ñ]½É‘]É…À¡ÑÉÕ”¤ìÁ…”¹‰½‘äéM•ÑMÁ…¥¹œ Ì¤(€€€™Õ¹Ñ¥½¸¡•±ÀéM¡½ÝQ½Á¥Œ¡¥¹‘•à¤(€€€€€€€Í•±˜¹Ñ½Á¥Œ€ô¥¹‘•à(€€€€€€€±½…°Ñ½Á¥Œ€ôÑ½Á¥Ím¥¹‘•át(€€€€€€€Á…”¹Ñ¥Ñ±”éM•ÑQ•áÐ¡Ñ½Á¥Œ¹Ñ¥Ñ±”¤ìÁ…”¹ÍÕµµ…ÉäéM•ÑQ•áÐ¡Ñ½Á¥Œ¹ÍÕµµ…Éä¤ìÁ…”¹‰½‘äéM•ÑQ•áÐ¡Ñ½Á¥Œ¹‰½‘ä¤(€€€€€€€™½È‰ÕÑÑ½¹%¹‘•à°‰ÕÑÑ½¸¥¸¥Á…¥ÉÌ¡Í•±˜¹Ñ½Á¥	ÕÑÑ½¹Ì¤‘¼(€€€€€€€€€€€±½…°Í•±•Ñ•€ô‰ÕÑÑ½¹%¹‘•à€ôô¥¹‘•à(€€€€€€€€€€€‰ÕÑÑ½¸¹}ÁÉ¥µ…Éä€ô™…±Í”(€€€€€€€€€€€‰ÕÑÑ½¸éM•Ñ	…­‘É½Á½±½È¡Õ¹Á…¬¡Í•±•Ñ•…¹ì€À¸Àà°€À¸ÈÈ°€À¸ÈÀ°€Äô½È¹…É‘±Ð¤¤(€€€€€€€€€€€‰ÕÑÑ½¸éM•Ñ	…­‘É½Á	½É‘•É½±½È¡Õ¹Á…¬¡Í•±•Ñ•…¹¹Ñ•…°½È¹‰½É‘•È¤¤(€€€€€€€€€€€‰ÕÑÑ½¸é•Ñ½¹ÑMÑÉ¥¹œ ¤éM•ÑQ•áÑ½±½È¡Õ¹Á…¬¡Í•±•Ñ•…¹¹Ñ•…°½È¹…•¹Ð¤¤(€€€€€€€•¹(€€€•¹(€€€™½È¥¹‘•à°Ñ½Á¥Œ¥¸¥Á…¥ÉÌ¡Ñ½Á¥Ì¤‘¼(€€€€€€€±½…°Ñ½Á¥%¹‘•à€ô¥¹‘•à(€€€€€€€±½…°‰ÕÑÑ½¸€ô	ÕÑÑ½¸¡É…¥°°Ñ½Á¥Œ¹Ñ¥Ñ±”°€ÄÜÐ°™Õ¹Ñ¥½¸ ¤¡•±ÀéM¡½ÝQ½Á¥Œ¡Ñ½Á¥%¹‘•à¤•¹¤(€€€€€€€‰ÕÑÑ½¸éM•Ñ!•¥¡Ð ÐÈ¤ì‰ÕÑÑ½¸éM•ÑA½¥¹Ð ‰Q=A1Pˆ°€à°€´à€´€¡¥¹‘•à€´€Ä¤€¨€ÐÜ¤(€€€€€€€‰ÕÑÑ½¸é•Ñ½¹ÑMÑÉ¥¹œ ¤é±•…É±±A½¥¹ÑÌ ¤ì‰ÕÑÑ½¸é•Ñ½¹ÑMÑÉ¥¹œ ¤éM•ÑA½¥¹Ð ‰1Pˆ°€ÄÀ°€À¤ì‰ÕÑÑ½¸é•Ñ½¹ÑMÑÉ¥¹œ ¤éM•Ñ)ÕÍÑ¥™å  ‰1Pˆ¤(€€€€€€€‰ÕÑÑ½¸é!½½­MÉ¥ÁÐ ‰=¹1•…Ù”ˆ°™Õ¹Ñ¥½¸¡Í•±˜¤(€€€€€€€€€€€¥˜¡•±À¹Ñ½Á¥Œ€ôôÑ½Á¥%¹‘•àÑ¡•¸(€€€€€€€€€€€€€€€Í•±˜éM•Ñ	…­‘É½Á½±½È À¸Àà°€À¸ÈÈ°€À¸ÈÀ°€Ä¤ìÍ•±˜éM•Ñ	…­‘É½Á	½É‘•É½±½È¡Õ¹Á…¬¡¹Ñ•…°¤¤(€€€€€€€€€€€•¹(€€€€€€€•¹¤(€€€€€€€¡•±À¹Ñ½Á¥	ÕÑÑ½¹Ím¥¹‘•át€ô‰ÕÑÑ½¸(€€€•¹(€€€±½…°ÍÑ…ÉÐ€ô	ÕÑÑ½¸¡¡•±À°€‰MÑ…ÉÐÕ¥‘•ÑÕÑ½É¥…°ˆ°€ÄäÀ°™Õ¹Ñ¥½¸ ¤¡•±Àé!¥‘” ¤ì¹ÌéMÑ…ÉÑQÕÑ½É¥…° ¤•¹°ÑÉÕ”¤(€€€ÍÑ…ÉÐéM•ÑA½¥¹Ð ‰	=QQ=51Pˆ°€Äà°€Äà¤ì¡•±À¹ÍÑ…ÉÐ€ôÍÑ…ÉÐ(€€€±½…°É•ÍÑ…ÉÐ€ô	ÕÑÑ½¸¡¡•±À°€‰I•ÍÑ…ÉÐÑÕÑ½É¥…°ˆ°€ÄÈÔ°™Õ¹Ñ¥½¸ ¤¡•±Àé!¥‘” ¤ì¹ÌéMÑ…ÉÑQÕÑ½É¥…° Ä¤•¹¤(€€€É•ÍÑ…ÉÐéM•ÑA½¥¹Ð ‰1Pˆ°ÍÑ…ÉÐ°€‰I%!Pˆ°€à°€À¤ì¡•±À¹É•ÍÑ…ÉÐ€ôÉ•ÍÑ…ÉÐ(€€€±½…°±½Í”€ô	ÕÑÑ½¸¡¡•±À°€‰±½Í”ˆ°€äÀ°™Õ¹Ñ¥½¸ ¤¡•±Àé!¥‘” ¤•¹¤(€€€±½Í”éM•ÑA½¥¹Ð ‰	=QQ=5I%!Pˆ°€´Äà°€Äà¤(€€€¡•±ÀéM•ÑMÉ¥ÁÐ ‰=¹!¥‘”ˆ°™Õ¹Ñ¥½¸ ¤(€€€€€€€¡•±ÀéMÑ½Á5½Ù¥¹=ÉM¥é¥¹œ ¤(€€€€€€€±•…É=ÕÑ±¥¹” ¤(€€€•¹¤(€€€¡•±ÀéM•ÑMÉ¥ÁÐ ‰=¹M¡½Üˆ°™Õ¹Ñ¥½¸ ¤¥ÑQ½MÉ••¸ ¤ì¡•±ÀéI…¥Í” ¤•¹¤(€€€¡•±ÀéM¡½ÝQ½Á¥Œ Ä¤(€€€±½…°‘¥ÍÁ±…åÙ•¹ÑÌ€ôÉ•…Ñ•É…µ” ‰É…µ”ˆ¤(€€€‘¥ÍÁ±…åÙ•¹ÑÌéI•¥ÍÑ•ÉÙ•¹Ð ‰%MA1e}M%i}!9ˆ¤ì‘¥ÍÁ±…åÙ•¹ÑÌéI•¥ÍÑ•ÉÙ•¹Ð ‰U%}M1}!9ˆ¤(€€€‘¥ÍÁ±…åÙ•¹ÑÌéM•ÑMÉ¥ÁÐ ‰=¹Ù•¹Ðˆ°™Õ¹Ñ¥½¸ ¤¥˜¡•±Àé%ÍM¡½Ý¸ ¤Ñ¡•¸¥ÑQ½MÉ••¸ ¤•¹•¹¤(€€€¥˜U%MÁ•¥…±É…µ•ÌÑ¡•¸U%MÁ•¥…±É…µ•ÍlU%MÁ•¥…±É…µ•Ì€¬€Åt€ô¡•±Àé•Ñ9…µ” ¤•¹(€€€¹Ì¹!•±Á•¹Ñ•È€ô¡•±À(€€€É•ÑÕÉ¸¡•±À)•¹()±½…°™Õ¹Ñ¥½¸É•…Ñ•QÕÑ½É¥…° ¤(€€€¥˜¹Ì¹QÕÑ½É¥…±…ÉÑ¡•¸É•ÑÕÉ¸¹Ì¹QÕÑ½É¥…±…É•¹(€€€±½…°…É€ôÉ•…Ñ•É…µ” ‰É…µ”ˆ°€‰É…µ•…µ‰¥ÑQÕÑ½É¥…°ˆ°U%A…É•¹Ð°€‰	…­‘É½ÁQ•µÁ±…Ñ”ˆ¤(€€€€´´Q¡”½… …ÉµÕÍÐÉ•µ…¥¸É•…‘…‰±”…™Ñ•ÈÑ¡”Á±…å•È±¥­Ì„É•…°(€€€€´´•‘¥Ñ½È½¹ÑÉ½°¸-••À¥Ð…‰½Ù”Ñ¡”½ÁÑ¥½¹ÌÁ…¹•°ìI•™É•Í¡QÕÑ½É¥…°…±Í¼(€€€€´´É…¥Í•Ì¥Ð…™Ñ•È•Ù•Éä±¥Ù”µ•‘¥Ñ½ÈÉ•™É•Í ¸(€€€…ÉéM•ÑM¥é” ÌäÀ°€ÈÈÀ¤ì…ÉéM•ÑÉ…µ•MÑÉ…Ñ„ ‰U11MI9}%1=ˆ¤ì…ÉéM•ÑÉ…µ•1•Ù•° äÔÀ¤ì…ÉéM•ÑQ½Á±•Ù•°¡ÑÉÕ”¤ì…Éé¹…‰±•5½ÕÍ”¡ÑÉÕ”¤ì…ÉéM•Ñ±…µÁ•‘Q½MÉ••¸¡ÑÉÕ”¤(€€€	…­‘É½À¡…É°¹Á…¹•°°¹Ñ•…°¤ì…Éé!¥‘” ¤(€€€±½…°­¥­•È€ôQ•áÐ¡…É°	=d°€‰U%Q=UHˆ°¹Ñ•…°¤ì­¥­•ÈéM•ÑA½¥¹Ð ‰Q=A1Pˆ°€ÄØ°€´ÄÐ¤(€€€±½…°Ñ¥Ñ±”€ôQ•áÐ¡…É°Q%Q1°€ˆˆ°¹…•¹Ð¤ìÑ¥Ñ±”éM•ÑA½¥¹Ð ‰Q=A1Pˆ°€ÄØ°€´ÌÌ¤ì…É¹Ñ¥Ñ±”€ôÑ¥Ñ±”(€€€±½…°‰½‘ä€ôQ•áÐ¡…É°€‰…µ•½¹Ñ!¥¡±¥¡Ðˆ°€ˆˆ°¹µÕÑ•¤ì‰½‘äéM•ÑA½¥¹Ð ‰Q=A1Pˆ°€ÄØ°€´ØÔ¤ì‰½‘äéM•ÑA½¥¹Ð ‰Q=AI%!Pˆ°€´ÄØ°€´ØÔ¤ì‰½‘äéM•Ñ)ÕÍÑ¥™å  ‰1Pˆ¤ì‰½‘äéM•Ñ)ÕÍÑ¥™åX ‰Q=@ˆ¤ì‰½‘äéM•Ñ]½É‘]É…À¡ÑÉÕ”¤ì…É¹‰½‘ä€ô‰½‘ä(€€€±½…°ÁÉ½É•ÍÌ€ôQ•áÐ¡…É°	=d°€ˆˆ°¹µÕÑ•¤ìÁÉ½É•ÍÌéM•ÑA½¥¹Ð ‰	=QQ=51Pˆ°€ÄØ°€ÄÔ¤ì…É¹ÁÉ½É•ÍÌ€ôÁÉ½É•ÍÌ(€€€…É¹‰…¬€ô	ÕÑÑ½¸¡…É°€‰	…¬ˆ°€Ôà°™Õ¹Ñ¥½¸ ¤¹Ì¹QÕÑ½É¥…°¹ÍÑ•À€ôµ…Ñ ¹µ…à Ä°¹Ì¹QÕÑ½É¥…°¹ÍÑ•À€´€Ä¤ì¹ÌéI•™É•Í¡QÕÑ½É¥…° ¤•¹¤(€€€…É¹‰…¬éM•ÑA½¥¹Ð ‰	=QQ=5I%!Pˆ°€´ÄÔÜ°€ÄÈ¤(€€€…É¹¹•áÐ€ô	ÕÑÑ½¸¡…É°€‰9•áÐˆ°€ØØ°™Õ¹Ñ¥½¸ ¤(€€€€€€€±½…°ÑÕÑ½É¥…°€ô¹Ì¹QÕÑ½É¥…°(€€€€€€€¥˜¹½ÐÑÕÑ½É¥…°½ÈÑÕÑ½É¥…°¹Á…ÕÍ•Ñ¡•¸É•ÑÕÉ¸•¹(€€€€€€€±½…°É•…‘ä°µ•ÍÍ…”€ô…¹‘Ù…¹”¡ÑÕÑ½É¥…°¤(€€€€€€€¥˜¹½ÐÉ•…‘äÑ¡•¸(€€€€€€€€€€€…É¹Ù…±¥‘…Ñ¥½¸éM•ÑQ•áÐ¡µ•ÍÍ…”½È€‰QÉäÑ¡¥ÌÍÑ•À™¥ÉÍÐ¸ˆ¤(€€€€€€€€€€€É•ÑÕÉ¸(€€€€€€€•¹(€€€€€€€¥˜ÑÕÑ½É¥…°¹ÍÑ•À€øô€MQALÑ¡•¸¹Ìé…¹•±QÕÑ½É¥…° ‰½µÁ±•Ñ”ˆ¤ìÉ•ÑÕÉ¸•¹(€€€€€€€¥˜ÑÕÑ½É¥…°¹ÍÑ•À€ôô€ÌÑ¡•¸M••‘QÕÑ½É¥…±MÑ…Ñ¥½¹…ÉåIÕ±”¡ÑÕÑ½É¥…°¤•¹(€€€€€€€ÑÕÑ½É¥…°¹ÍÑ•À€ôÑÕÑ½É¥…°¹ÍÑ•À€¬€Äì¹ÌéI•™É•Í¡QÕÑ½É¥…° ¤(€€€•¹°ÑÉÕ”¤(€€€…É¹¹•áÐéM•ÑA½¥¹Ð ‰1Pˆ°…É¹‰…¬°€‰I%!Pˆ°€Ø°€À¤(€€€…É¹Í­¥À€ô	ÕÑÑ½¸¡…É°€‰M­¥Àˆ°€Ðà°™Õ¹Ñ¥½¸ ¤¹Ìé…¹•±QÕÑ½É¥…° ‰Í­¥ÁÁ•ˆ¤•¹¤(€€€…É¹Í­¥ÀéM•ÑA½¥¹Ð ‰1Pˆ°…É¹¹•áÐ°€‰I%!Pˆ°€Ø°€À¤(€€€±½Í•	ÕÑÑ½¸¡…É°™Õ¹Ñ¥½¸ ¤¹Ìé…¹•±QÕÑ½É¥…° ‰±½Í•ˆ¤•¹¤éM•ÑA½¥¹Ð ‰Q=AI%!Pˆ°€´Ô°€´Ô¤((€€€±½…°Ù…±¥‘…Ñ¥½¸€ôQ•áÐ¡…É°	=d°€ˆˆ°¹…µ‰•È¤(€€€Ù…±¥‘…Ñ¥½¸éM•ÑA½¥¹Ð ‰	=QQ=51Pˆ°€ÄØ°€Ìä¤ìÙ…±¥‘…Ñ¥½¸éM•ÑA½¥¹Ð ‰	=QQ=5I%!Pˆ°€´ÄØ°€Ìä¤(€€€Ù…±¥‘…Ñ¥½¸éM•Ñ)ÕÍÑ¥™å  ‰1Pˆ¤ì…É¹Ù…±¥‘…Ñ¥½¸€ôÙ…±¥‘…Ñ¥½¸((€€€…ÉéM•ÑMÉ¥ÁÐ ‰=¹!¥‘”ˆ°™Õ¹Ñ¥½¸ ¤(€€€€€€€€´´Í…Á”ÕÍ•ÌU%MÁ•¥…±É…µ•Ì…¹¡¥‘•ÌÑ¡”…É‘¥É•Ñ±ä¸(€€€€€€€¥˜¹Ì¹QÕÑ½É¥…°…¹¹½Ð¹Ì¹QÕÑ½É¥…°¹±½Í¥¹œ…¹¹½Ð¹Ì¹QÕÑ½É¥…°¹¡¥‘¥¹½É½µ‰…ÐÑ¡•¸¹Ìé…¹•±QÕÑ½É¥…° ‰±½Í•ˆ¤•¹(€€€•¹¤(€€€Ñ…‰±”¹¥¹Í•ÉÐ¡U%MÁ•¥…±É…µ•Ì°€‰É…µ•…µ‰¥ÑQÕÑ½É¥…°ˆ¤(€€€¹Ì¹QÕÑ½É¥…±…É€ô…É(€€€É•ÑÕÉ¸…É)•¹()™Õ¹Ñ¥½¸¹Ìé=Á•¹!•±À ¤(€€€¥˜%Í½µ‰…Ð ¤Ñ¡•¸9½Ñ¥” ‰=Á•¸!•±À½ÕÑÍ¥‘”½µ‰…Ð¸ˆ°¹…µ‰•È¤ìÉ•ÑÕÉ¸•¹(€€€€´´!•±À…¹Ñ¡”½… …É…É”µÕÑÕ…±±ä•á±ÕÍ¥Ù”¸M…Ù”Ñ¡”±¥Ù”ÍÑ•À(€€€€´´‰•™½É”½Á•¹¥¹œ!•±ÀÍ¼I•ÍÕµ”…±Ý…åÌ‘•ÍÉ¥‰•ÌÑ¡”É•…°Ñ½ÕÈÍÑ…Ñ”¸(€€€¥˜¹Ì¹QÕÑ½É¥…°Ñ¡•¸¹Ìé…¹•±QÕÑ½É¥…° ‰¡•±Á}½Á•¹•ˆ¤•¹(€€€±½…°¡•±À€ôÉ•…Ñ•!•±À ¤(€€€±½…°Í…Ù•‘MÑ•À°½µÁ±•Ñ•€ô•ÑMÑ…Ñ” ¤(€€€¥˜½µÁ±•Ñ•Ñ¡•¸(€€€€€€€¡•±À¹ÍÑ…ÉÐé•Ñ½¹ÑMÑÉ¥¹œ ¤éM•ÑQ•áÐ ‰I•Á±…äÕ¥‘•ÑÕÑ½É¥…°ˆ¤(€€€€€€€¡•±À¹É•ÍÑ…ÉÐé!¥‘” ¤(€€€•±Í•¥˜Í…Ù•‘MÑ•À€ø€ÄÑ¡•¸(€€€€€€€¡•±À¹ÍÑ…ÉÐé•Ñ½¹ÑMÑÉ¥¹œ ¤éM•ÑQ•áÐ ‰I•ÍÕµ”Õ¥‘•ÑÕÑ½É¥…°ˆ¤(€€€€€€€¡•±À¹É•ÍÑ…ÉÐéM¡½Ü ¤(€€€•±Í”(€€€€€€€¡•±À¹ÍÑ…ÉÐé•Ñ½¹ÑMÑÉ¥¹œ ¤éM•ÑQ•áÐ ‰MÑ…ÉÐÕ¥‘•ÑÕÑ½É¥…°ˆ¤(€€€€€€€¡•±À¹É•ÍÑ…ÉÐé!¥‘” ¤(€€€•¹(€€€¡•±ÀéM¡½ÝQ½Á¥Œ Ä¤(€€€¡•±ÀéM¡½Ü ¤(€€€¡•±ÀéI…¥Í” ¤)•¹()™Õ¹Ñ¥½¸¹ÌéQ½±•!•±À ¤(€€€¥˜¹Ì¹!•±Á•¹Ñ•È…¹¹Ì¹!•±Á•¹Ñ•Èé%ÍM¡½Ý¸ ¤Ñ¡•¸(€€€€€€€¹Ìé±½Í•!•±À ¤(€€€€€€€É•ÑÕÉ¸(€€€•¹(€€€¹Ìé=Á•¹!•±À ¤)•¹()™Õ¹Ñ¥½¸¹Ìé±½Í•!•±À ¤(€€€¥˜¹Ì¹!•±Á•¹Ñ•ÈÑ¡•¸¹Ì¹!•±Á•¹Ñ•Èé!¥‘” ¤•¹)•¹()™Õ¹Ñ¥½¸¹ÌéMÑ…ÉÑQÕÑ½É¥…°¡É•ÅÕ•ÍÑ•‘MÑ•À¤(€€€¥˜%Í½µ‰…Ð ¤Ñ¡•¸9½Ñ¥” ‰Q¡”Õ¥‘•ÑÕÑ½É¥…°ÍÑ…ÉÑÌ½ÕÑÍ¥‘”½µ‰…Ð¸ˆ°¹…µ‰•È¤ìÉ•ÑÕÉ¸™…±Í”•¹(€€€±½…°Á…¹•°€ô¹ÍÕÉ•=ÁÑ¥½¹Ì ¤(€€€¥˜¹½ÐÁ…¹•°Ñ¡•¸É•ÑÕÉ¸™…±Í”•¹(€€€¹Ìé±½Í•!•±À ¤(€€€±½…°Í…Ù•‘MÑ•À°½µÁ±•Ñ•€ô•ÑMÑ…Ñ” ¤(€€€±½…°ÍÑ•À€ôÑ½¹Õµ‰•È¡É•ÅÕ•ÍÑ•‘MÑ•À¤½È€¡½µÁ±•Ñ•…¹€Ä½ÈÍ…Ù•‘MÑ•À¤(€€€ÍÑ•À€ôµ…Ñ ¹µ…à Ä°µ…Ñ ¹µ¥¸ MQAL°ÍÑ•À¤¤(€€€¹Ì¹QÕÑ½É¥…°€ôì(€€€€€€€ÍÑ•À€ôÍÑ•À°(€€€€€€€Á…ÕÍ•€ô™…±Í”°(€€€€€€€Ý…Í½µÁ±•Ñ•€ô½µÁ±•Ñ•€ôôÑÉÕ”°(€€€ô(€€€±½…°ÍÑ…ÉÑ•°É•…Í½¸€ôMÑ…ÉÑQÕÑ½É¥…±Q…É•Ð¡¹Ì¹QÕÑ½É¥…°°ÍÑ•À€ø€Ä¤(€€€¥˜¹½ÐÍÑ…ÉÑ•Ñ¡•¸(€€€€€€€±½…°ÑÕÑ½É¥…°€ô¹Ì¹QÕÑ½É¥…°(€€€€€€€¹Ì¹QÕÑ½É¥…°€ô¹¥°(€€€€€€€±•…¹ÕÁQÕÑ½É¥…±Q…É•Ð¡ÑÕÑ½É¥…°¤(€€€€€€€9½Ñ¥”¡É•…Í½¸½È€‰Q¡”Ñ•µÁ½É…ÉäQÕÑ½É¥…°É…µ”½Õ±¹½Ð‰”É•…Ñ•¸ˆ°¹…µ‰•È¤(€€€€€€€É•ÑÕÉ¸™…±Í”(€€€•¹(€€€±½…°…É€ôÉ•…Ñ•QÕÑ½É¥…° ¤(€€€…ÉéM¡½Ü ¤ì¹ÌéI•™É•Í¡QÕÑ½É¥…° ¤(€€€É•ÑÕÉ¸ÑÉÕ”)•¹()™Õ¹Ñ¥½¸¹Ìé…¹•±QÕÑ½É¥…°¡É•…Í½¸¤(€€€±½…°ÑÕÑ½É¥…°€ô¹Ì¹QÕÑ½É¥…°(€€€¥˜¹½ÐÑÕÑ½É¥…°Ñ¡•¸É•ÑÕÉ¸•¹(€€€±½…°½µÁ±•Ñ•€ôÉ•…Í½¸€ôô€‰½µÁ±•Ñ”ˆ½ÈÑÕÑ½É¥…°¹Ý…Í½µÁ±•Ñ•€ôôÑÉÕ”(€€€M…Ù•MÑ…Ñ”¡½µÁ±•Ñ•…¹€MQAL½ÈÑÕÑ½É¥…°¹ÍÑ•À½È€Ä°½µÁ±•Ñ•¤(€€€±•…É=ÕÑ±¥¹” ¤ì±•…ÉMÁ½Ñ±¥¡Ð ¤(€€€ÑÕÑ½É¥…°¹±½Í¥¹œ€ôÑÉÕ”(€€€¥˜¹Ì¹QÕÑ½É¥…±…ÉÑ¡•¸¹Ì¹QÕÑ½É¥…±…Éé!¥‘” ¤•¹(€€€¹Ì¹QÕÑ½É¥…°€ô¹¥°(€€€±•…¹ÕÁQÕÑ½É¥…±Q…É•Ð¡ÑÕÑ½É¥…°¤(€€€¥˜¹Ì¹=ÁÑ¥½¹Ì…¹¹Ì¹=ÁÑ¥½¹Ì¹¡•±Á	ÕÑÑ½¸…¹¹Ì¹=ÁÑ¥½¹Ì¹¡•±Á	ÕÑÑ½¸¹ÑÕÑ½É¥…±½ÐÑ¡•¸(€€€€€€€¹Ì¹=ÁÑ¥½¹Ì¹¡•±Á	ÕÑÑ½¸¹ÑÕÑ½É¥…±½ÐéM•ÑM¡½Ý¸¡¹½Ð½µÁ±•Ñ•¤(€€€•¹(€€€¥˜½µÁ±•Ñ•Ñ¡•¸9½Ñ¥” ‰QÕÑ½É¥…°½µÁ±•Ñ”¸e½Ô…¸É•ÍÑ…ÉÐ¥Ð…¹äÑ¥µ”™É½´!•±À¸ˆ°¹Ñ•…°¤•¹)•¹()™Õ¹Ñ¥½¸¹ÌéI•™É•Í¡QÕÑ½É¥…° ¤(€€€±½…°ÑÕÑ½É¥…°°…É€ô¹Ì¹QÕÑ½É¥…°°¹Ì¹QÕÑ½É¥…±…É(€€€¥˜¹½ÐÑÕÑ½É¥…°½È¹½Ð…É½È¹½Ð…Éé%ÍM¡½Ý¸ ¤Ñ¡•¸É•ÑÕÉ¸•¹(€€€¥˜%Í½µ‰…Ð ¤Ñ¡•¸¹Ìé=¹QÕÑ½É¥…±½µ‰…ÑMÑ…Ñ•¡…¹•¡ÑÉÕ”¤ìÉ•ÑÕÉ¸•¹(€€€±½…°ÍÑ•À€ôMQAMmÑÕÑ½É¥…°¹ÍÑ•Át½ÈMQAMlÅt(€€€…É¹Ñ¥Ñ±”éM•ÑQ•áÐ¡ÍÑ•À¹Ñ¥Ñ±”¤ì…É¹‰½‘äéM•ÑQ•áÐ¡ÍÑ•À¹‰½‘ä¤(€€€…É¹Ù…±¥‘…Ñ¥½¸éM•ÑQ•áÐ ˆˆ¤(€€€…É¹ÁÉ½É•ÍÌéM•ÑQ•áÐ ‰MÑ•À€ˆ€¸¸ÑÕÑ½É¥…°¹ÍÑ•À€¸¸€ˆ½˜€ˆ€¸¸€MQAL¤(€€€…É¹‰…¬éM•ÑM¡½Ý¸¡ÑÕÑ½É¥…°¹ÍÑ•À€ø€Ä¤ì…É¹¹•áÐé•Ñ½¹ÑMÑÉ¥¹œ ¤éM•ÑQ•áÐ¡ÍÑ•À¹™¥¹¥Í …¹€‰¥¹¥Í ˆ½È€‰9•áÐˆ¤(€€€…ÉéM•Ñ!•¥¡Ð ÈÈÀ¤(€€€±½…°Ñ…É•Ð€ô¥¹‘½¹ÑÉ½°¡ÍÑ•À¹™½ÕÌ¤(€€€!¥¡±¥¡Ð¡Ñ…É•Ð¤ìMÁ½Ñ±¥¡Ð¡Ñ…É•Ð¤(€€€€´´AÕÐÑ¡”…É‰•Í¥‘”Ñ¡”¡¥¡±¥¡Ñ•Ñ…É•ÐÝ¡•¹•Ù•ÈÑ¡•É”¥ÌÉ½½´ìÑ¡”(€€€€´´•‘¥Ñ½ÈÍÑ…åÌ±¥­…‰±”…¹Ñ¡”•áÁ±…¹…Ñ¥½¸¹•Ù•ÈÍ¥ÑÌ½¸¥ÑÌÑ…É•Ð¸(€€€…ÉéM•ÑM…±” Ä¤(€€€…Éé±•…É±±A½¥¹ÑÌ ¤(€€€±½…°Á…¹•°€ô¹Ì¹=ÁÑ¥½¹Ì(€€€±½…°½µÁ…Ð€ôU%A…É•¹Ðé•Ñ]¥‘Ñ  ¤€ð€ÄÀÀÀ½ÈU%A…É•¹Ðé•Ñ!•¥¡Ð ¤€ð€ØÔÀ(€€€€€€€½È€¡Á…¹•°…¹€¡Á…¹•°é•Ñ]¥‘Ñ  ¤€ðô€àÀÀ½ÈÁ…¹•°é•Ñ!•¥¡Ð ¤€ðô€ÔÐÀ¤¤(€€€¥˜½µÁ…ÐÑ¡•¸(€€€€€€€€´´=¸„Íµ…±°Ù¥•ÝÁ½ÉÐÑ¡•É”¥Ì¹¼¡½¹•ÍÐÝ…äÑ¼™¥ÐÑ¡”…É‰•Í¥‘”„(€€€€€€€€´´±…É”•‘¥Ñ½ÈÁ…¹”¸½¬¥Ð½µÁ…Ñ±ä…¹É•µ½Ù”Ñ¡”½µÁ•Ñ¥¹œ‰½à¸(€€€€€€€±•…É=ÕÑ±¥¹” ¤ì±•…ÉMÁ½Ñ±¥¡Ð ¤(€€€€€€€…ÉéM•ÑM…±” À¸àà¤(€€€€€€€…ÉéM•ÑA½¥¹Ð ‰	=QQ=5I%!Pˆ°U%A…É•¹Ð°€‰	=QQ=5I%!Pˆ°€´ÄÐ°€ÄÐ¤(€€€€€€€…ÉéI…¥Í” ¤(€€€€€€€É•ÑÕÉ¸(€€€•¹(€€€€´´¹½Éµ…°•‘¥Ñ½È±•…Ù•Ì„•¹•É½ÕÌ½±Õµ¸Ñ¼¥ÑÌ±•™Ð½¸Ý¥‘”ÍÉ••¹Ì¸(€€€€´´½­¥¹œÑ¡”•áÁ±…¹…Ñ¥½¸Ñ¡•É”­••ÁÌ¥ÐÙ¥Í¥‰±”€©…¹¨ÁÉ•Ù•¹ÑÌ¥Ð™É½´(€€€€´´½Ù•É¥¹œÑ¡”É•…°Ñ…É•ÐÉ½Ü½È‰ÕÑÑ½¸Ñ¡”Á±…å•ÈµÕÍÐ±¥¬¹•áÐ¸(€€€±½…°Á…¹•±1•™Ð(€€€¥˜Á…¹•°…¹¹Ì¹•ÑUÍ…‰±•É…µ•I•ÐÑ¡•¸Á…¹•±1•™Ð€ô¹Ìé•ÑUÍ…‰±•É…µ•I•Ð¡Á…¹•°¤•¹(€€€¥˜Á…¹•±1•™Ð…¹Á…¹•±1•™Ð€øô€ÐÈÈÑ¡•¸(€€€€€€€…ÉéM•ÑA½¥¹Ð ‰	=QQ=51Pˆ°U%A…É•¹Ð°€‰	=QQ=51Pˆ°€Äà°€Äà¤(€€€€€€€…ÉéI…¥Í” ¤(€€€€€€€É•ÑÕÉ¸(€€€•¹(€€€¥˜M…™•M¡½Ý¸¡Ñ…É•Ð¤Ñ¡•¸(€€€€€€€±½…°±•™Ð°‰½ÑÑ½´°Ý¥‘Ñ °¡•¥¡Ð(€€€€€€€¥˜¹Ì¹•ÑUÍ…‰±•É…µ•I•ÐÑ¡•¸(€€€€€€€€€€€±•™Ð°‰½ÑÑ½´°Ý¥‘Ñ °¡•¥¡Ð€ô¹Ìé•ÑUÍ…‰±•É…µ•I•Ð¡Ñ…É•Ð¤(€€€€€€€•¹(€€€€€€€¥˜±•™Ð…¹‰½ÑÑ½´…¹Ý¥‘Ñ …¹¡•¥¡Ð…¹±•™Ð€¬Ý¥‘Ñ €¬€ÐÀØ€ðU%A…É•¹Ðé•Ñ]¥‘Ñ  ¤Ñ¡•¸(€€€€€€€€€€€…ÉéM•ÑA½¥¹Ð ‰Q=A1Pˆ°U%A…É•¹Ð°€‰	=QQ=51Pˆ°±•™Ð€¬Ý¥‘Ñ €¬€ÄÈ°‰½ÑÑ½´€¬¡•¥¡Ð¤(€€€€€€€•±Í•¥˜±•™Ð…¹‰½ÑÑ½´…¹Ý¥‘Ñ …¹¡•¥¡Ð…¹±•™Ð€´€ÐÀØ€ø€ÀÑ¡•¸(€€€€€€€€€€€…ÉéM•ÑA½¥¹Ð ‰Q=AI%!Pˆ°U%A…É•¹Ð°€‰	=QQ=51Pˆ°±•™Ð€´€ÄÈ°‰½ÑÑ½´€¬¡•¥¡Ð¤(€€€€€€€•±Í”(€€€€€€€€€€€…ÉéM•ÑA½¥¹Ð ‰9QHˆ°U%A…É•¹Ð°€‰9QHˆ°€À°€µU%A…É•¹Ðé•Ñ!•¥¡Ð ¤€¨€À¸ÈÐ¤(€€€€€€€•¹(€€€•±Í”(€€€€€€€…ÉéM•ÑA½¥¹Ð ‰9QHˆ°U%A…É•¹Ð°€‰9QHˆ°€À°€µU%A…É•¹Ðé•Ñ!•¥¡Ð ¤€¨€À¸ÈÐ¤(€€€•¹(€€€…ÉéI…¥Í” ¤)•¹()™Õ¹Ñ¥½¸¹Ìé=¹QÕÑ½É¥…±½µ‰…ÑMÑ…Ñ•¡…¹•¡¥¹½µ‰…Ð¤(€€€±½…°ÑÕÑ½É¥…°°…É€ô¹Ì¹QÕÑ½É¥…°°¹Ì¹QÕÑ½É¥…±…É(€€€¥˜¹½ÐÑÕÑ½É¥…°½È¹½Ð…ÉÑ¡•¸É•ÑÕÉ¸•¹(€€€¥˜¥¹½µ‰…ÐÑ¡•¸(€€€€€€€ÑÕÑ½É¥…°¹Á…ÕÍ•€ôÑÉÕ”ìÑÕÑ½É¥…°¹¡¥‘¥¹½É½µ‰…Ð€ôÑÉÕ”ì±•…É=ÕÑ±¥¹” ¤ì±•…ÉMÁ½Ñ±¥¡Ð ¤(€€€€€€€…Éé!¥‘” ¤(€€€•±Í•¥˜ÑÕÑ½É¥…°¹Á…ÕÍ•Ñ¡•¸(€€€€€€€ÑÕÑ½É¥…°¹Á…ÕÍ•€ô™…±Í”ìÑÕÑ½É¥…°¹¡¥‘¥¹½É½µ‰…Ð€ô™…±Í”ì…ÉéM¡½Ü ¤ì…É¹¹•áÐéM¡½Ü ¤ì…É¹Í­¥Àé•Ñ½¹ÑMÑÉ¥¹œ ¤éM•ÑQ•áÐ ‰M­¥Àˆ¤ì¹ÌéI•™É•Í¡QÕÑ½É¥…° ¤(€€€•¹)•¹
