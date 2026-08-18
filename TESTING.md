@@ -32,7 +32,7 @@ active profile, graph consistency, and currently unavailable adapters.
    abort; completion and the cleared notification must be preserved.
 9. Run the tour for more than 2.5 seconds while Cinematic is active. Its card
    and temporary frame must remain fully visible through Cinematic root scans.
-10. Resize the editor to 760x500. The subtitle must stop before Help, and the
+10. Resize the editor to 900x560. The subtitle must stop before Help, and the
    compact tutorial must dock without drawing a highlight or dim layer.
 11. Compare the active profile before and after. Targets, reactions,
    relationships, timing, and opacity must remain unchanged.
@@ -70,8 +70,8 @@ active profile, graph consistency, and currently unavailable adapters.
    invisibly or retain mouse input; closing it returns that window to the
    Cinematic blackout.
 9. Press the orange Cinematic header button. The main editor must stay open,
-   gain its orange border, default the target rail to **Managed**, and show a
-   separate inline Cinematic strip without covering the subtitle or Presence
+   gain its orange border and show a separate inline Cinematic strip without
+   covering the subtitle or Presence
    panel. Managed dots and live-state accents must be orange; unavailable
    target dots and warning/confirm states must be red. Use the strip's
    `Turn off` button to return to the previous profile without closing the
@@ -91,6 +91,25 @@ active profile, graph consistency, and currently unavailable adapters.
    Yes matches only while moving and No only while stationary. Reorder them,
    then add a second Form card and confirm each configurable card keeps its
    own picker value and Boolean answer.
+   In both Add reaction and Add requirements, confirm the top **CATEGORIES**
+   rail is visually distinct from condition cards: muted category labels use
+   a thin active underline, while selectable conditions remain raised cards.
+   Open **Add reaction** with no AND picker involved and confirm every card in
+   the selected category is visible and selectable.
+   Add AND requirements from two categories and reopen the picker: each
+   category holding a saved requirement must show a small teal corner marker.
+   Hover the row's `+N` button and confirm its tooltip lists the base
+   condition and all N added requirements.
+   Add **In arena**, then confirm **In Delve**, **In dungeon**, **In open
+   world**, every other specific instance type, **In party**, and **In raid** are greyed out
+   and cannot be selected. Existing incompatible imported/saved requirements
+   must be red but remain clickable so the player can remove them.
+   In Travel, add **Pet battle** and confirm Vehicle, Flight path, Fishing,
+   Mounted, Flying, Dragonriding, Swimming, and Underwater grey out. Remove
+   it, then confirm Vehicle, Flight path, and Fishing are mutually exclusive,
+   while **Swimming** and **Underwater** remain valid together.
+   In Moments, select one quest event and confirm the other quest-event cards
+   grey out. Loot window opened and Looted an item must remain combinable.
 4. Add a **Spec** card. Its picker must ask for class first, then spec. Choose
    the current class/spec and confirm it matches; choose another spec in the
    class and confirm it is greyed when unmatched; choose another class and
@@ -129,6 +148,10 @@ active profile, graph consistency, and currently unavailable adapters.
    Confirm Mouseover and In combat start above Otherwise.
 13. Add two reactions with different opacity, drag one by its `::` handle past
    the other, and confirm the first matching row is now the intended rule.
+   During the drag, the complete reaction card must follow the cursor and the
+   remaining cards must make a live card-sized gap at the prospective drop
+   position. Its condition text must stay centered like a stationary card;
+   cancelling must restore the original order and card appearance.
 14. Create a hover group and a parent→child link. Use **Preview frames** to
    confirm the teal/lavender/red outlines match the direct relationships.
 15. Create, switch, export, import, and delete a disposable profile. The import
@@ -136,11 +159,11 @@ active profile, graph consistency, and currently unavailable adapters.
 16. Select a configured frame and press Copy. Select another frame; Paste must
    light only while the internal rule copy is valid. Paste it and verify fresh
    reaction IDs, identical order/timing/opacities, and no copied relationships.
-17. Switch the target rail between List and Tree. Link an unmanaged child by
+17. The target rail always shows its hierarchy. Link an unmanaged child by
     dragging it onto a managed parent: it must become an indented clean follower
     with no starter rows shadowing inheritance. Add a local child rule and
     verify it wins when matched, then falls back to the parent's result. Reject
-    cycles and a second parent. Switch back to List without changing behavior.
+    cycles and a second parent.
 
 ## Details windows
 
@@ -220,12 +243,51 @@ active profile, graph consistency, and currently unavailable adapters.
 5. Verify Cast Bar defaults to Casting only and Resource Bars defaults to
    Combat only. Both remain editable through the ordered-rule editor.
 
+## Editor hierarchy
+
+1. Open the normal editor at its default size. Confirm the header reads left
+   to right as Help, Peek, Profile, then Cinematic; the version text must not
+   collide with those controls.
+2. Confirm the body has three clear work areas: **Targets**, the selected
+   frame's ordered rules (including the first-match hint and Copy/Paste), and
+   **Transition & relationships**. Pick and Discover sit together above the
+   target search, while timing/outline controls are visibly separated from
+   relationship controls in the inspector.
+3. Resize the editor through its supported range, then enter and leave
+   Cinematic. Columns must remain attached to the header/footer with no
+   overlapping controls; the Cinematic strip must expand only beneath the
+   header controls. Copy, Paste, Reset, and every relationship button must
+   remain usable. All edits must still take effect immediately.
+4. Confirm the Profile dropdown and reaction priority controls use drawn,
+   mirrored triangle icons rather than missing-font squares. The remove X must
+   use a muted deep-red border/text treatment. Start a reaction drag and
+   confirm the ghost repeats those same icons.
+5. In normal mode, Cinematic is a header entry action. Once active, **Turn
+   off** in the inline strip must return to the prior profile, while the
+   **Editing: Cinematic** profile control must open the profile picker. Choose
+   a normal profile there and verify it exits Cinematic editing and switches
+   to that profile without an editor notice.
+6. Confirm the right inspector uses a compact Transition title/icon, separate
+   Fade and Wait buttons, a Frame outline / Preview card, and three icon-led
+   relationship cards. Tooltips must retain the explanatory detail.
+7. Confirm the profile label contains no fallback-font square and has only the
+   drawn dropdown triangle. The header action must read **Preview**. Reload
+   in both normal and Cinematic editing, then verify every reaction's drawn
+   remove X remains deep red.
+8. Confirm the inspector uses the packaged flat lavender Transition, eye,
+   group, link, and visibility icons with transparent backgrounds at normal
+   UI scale and after changing UI scale. No icon may show a black box, stretch
+   outside its card, or replace its button's click target.
+9. Confirm inspector icons are visually smaller than their card labels and
+   retain comfortable transparent padding. Open the timing picker from both
+   compact controls: its two sliders must read **Fade duration** then **Wait
+   before fade**, matching the values shown in the inspector.
+
 ## Availability and coexistence
 
-1. Toggle `Managed only` with a mix of controlled and catalog-only targets.
-   Only targets belonging to the current profile should remain in the rail;
-   switching profiles must immediately reflect that profile without adding or
-   removing any rules.
+1. With a mix of controlled and catalog-only targets, verify the target rail
+   always preserves its hierarchy. Search frames and switch profiles; the
+   rail must update without adding or removing rules.
 
 1. With Cinematic active, verify Details, chat, action bars, objectives, buffs,
    status/cast bars, EUI data bars, and cooldown viewers remain blacked out.

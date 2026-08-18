@@ -1,7 +1,7 @@
 local ADDON, ns = ...
 
 ns.NAME = "Frame Gambit"
-ns.VERSION = "2.8.0"
+ns.VERSION = "2.9.0"
 BINDING_HEADER_PRIORITYFADER = "Frame Gambit"
 BINDING_NAME_PRIORITYFADER_TOGGLE_CINEMATIC = "Toggle Frame Gambit Cinematic Mode"
 ns.MAX_REACTIONS_PER_TARGET = 32
@@ -116,6 +116,58 @@ local CONDITION_INFO = {
     pvp = { label = "PvP flagged", category = "legacy", kind = "state", internal = true },
 }
 ns.CONDITION_INFO = CONDITION_INFO
+
+-- AND requirements should describe a state that can actually happen. Keep
+-- this deliberately conservative: only encode pairs Retail's own state APIs
+-- guarantee are mutually exclusive, while preserving valid combinations such
+-- as Flying + Dragonriding and Swimming + Underwater.
+local EXCLUSIVE_REQUIREMENT_GROUPS = {
+    { "combat", "out_of_combat" },
+    { "target_hostile", "target_friendly" },
+    { "group", "raid", "solo" },
+    { "open_world", "dungeon", "raid_instance", "battleground", "arena", "scenario", "delve" },
+    { "vehicle", "taxi", "pet_battle", "fishing" },
+    -- Specific quest moments can share a brief timestamp window, but an AND
+    -- of two different quest events is not a useful player-facing filter.
+    -- Use separate ordered reactions when they need different responses.
+    { "quest_update", "quest_accepted", "quest_turned_in", "quest_objective" },
+    { "indoors", "outdoors" },
+}
+local EXCLUSIVE_REQUIREMENT_PAIRS = {
+    { "instance", "open_world" },
+    { "no_target", "target_any" }, { "no_target", "target_hostile" },
+    { "no_target", "target_friendly" }, { "no_target", "target_dead" },
+    { "pet_battle", "mounted" }, { "pet_battle", "flying" },
+    { "pet_battle", "dragonriding" }, { "pet_battle", "swimming" },
+    { "pet_battle", "underwater" },
+    { "fishing", "flying" }, { "fishing", "dragonriding" },
+    { "fishing", "swimming" }, { "fishing", "underwater" },
+    { "taxi", "swimming" }, { "taxi", "underwater" },
+}
+local REQUIREMENT_CONFLICTS = {}
+local function MarkRequirementConflict(first, second)
+    REQUIREMENT_CONFLICTS[first] = REQUIREMENT_CONFLICTS[first] or {}
+    REQUIREMENT_CONFLICTS[second] = REQUIREMENT_CONFLICTS[second] or {}
+    REQUIREMENT_CONFLICTS[first][second], REQUIREMENT_CONFLICTS[second][first] = true, true
+end
+for _, group in ipairs(EXCLUSIVE_REQUIREMENT_GROUPS) do
+    for first = 1, #group - 1 do
+        for second = first + 1, #group do MarkRequirementConflict(group[first], group[second]) end
+    end
+end
+for _, pair in ipairs(EXCLUSIVE_REQUIREMENT_PAIRS) do MarkRequirementConflict(pair[1], pair[2]) end
+
+function ns:GetRequirementConflict(reaction, candidate, skipExisting)
+    if type(reaction) ~= "table" or type(candidate) ~= "string" then return nil end
+    local function Conflicts(condition)
+        return condition ~= candidate and REQUIREMENT_CONFLICTS[candidate] and REQUIREMENT_CONFLICTS[candidate][condition]
+    end
+    if Conflicts(reaction.condition) then return reaction.condition end
+    for _, condition in ipairs(reaction.requirements or {}) do
+        if condition ~= skipExisting and Conflicts(condition) then return condition end
+    end
+    return nil
+end
 
 -- Form entries deliberately describe only gameplay forms that WoW exposes in
 -- the player's shapeshift bar.  A reaction is skipped when its form is not
@@ -1492,7 +1544,6 @@ function ns:ToggleCinematic(keepOptionsOpen)
         end
         if self.CloseHelp then self:CloseHelp() end
         if keepOptionsOpen and self.Options then
-            self.Options.managedOnly = true
             self.Options.selected = nil
         end
         if self.PrimeCinematicTargets then self:PrimeCinematicTargets() end

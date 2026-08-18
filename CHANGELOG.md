@@ -2,6 +2,131 @@
 
 ## Unreleased
 
+## 2.9.0 - Editor and Cinematic refinement release
+
+- Reworks the main editor into a clearer Targets, ordered reactions, and
+  Transition & relationships layout, with compact visual controls and a
+  purpose-made flat inspector icon set.
+- Refines Cinematic editing so it stays within the familiar main editor while
+  preserving access to normal profiles and safe scene exit.
+- Expands the gambit and tutorial experience with repeatable conditions,
+  requirement conflict protection, live priority reordering, and a real
+  temporary practice frame.
+
+## 2.8.15 - Calmer inspector scale and timing language
+
+- Replaces the inspector sheet with the preferred composed icon artwork and
+  scales each sprite down within its cell for quieter card spacing.
+- Uses the same unambiguous timing names everywhere: **Fade duration** and
+  **Wait before fade** replace the reversed-looking Transition time/Fade-out
+  delay terminology in the timing popup.
+
+## 2.8.14 - Inspector icon set
+
+- Adds a purpose-made, flat lavender icon sprite sheet for Transition,
+  Preview, Hover group, Linked child, and Visibility child. The inspector now
+  uses those consistent artwork assets instead of improvised texture bars.
+
+## 2.8.13 - Reliable header and remove icons
+
+- Uses a dedicated profile-label font string, leaving no legacy glyph content
+  behind the drawn profile arrow on clients with incomplete font coverage.
+- Renames the header's temporary editor-collapse action from **Peek** to the
+  clearer **Preview**.
+- Draws the reaction remove X in deep red, so the destructive cue remains
+  stable through normal and Cinematic theme refreshes.
+
+## 2.8.12 - Visual controls pass
+
+- Replaces unreliable font-glyph arrows with drawn triangles for profile
+  selection and reaction priority controls; the mirrored up/down icons also
+  appear correctly on the live drag card.
+- Gives reaction removal a restrained deep-red treatment instead of the
+  normal lavender action color.
+- Rebuilds the right inspector toward the visual-card layout: compact Fade and
+  Wait controls, drawn Transition/Preview/relationship icons, Preview and
+  relationship cards with visual On/Off states, and tooltips in place of the
+  always-visible safety paragraph.
+- The header Cinematic button is now an entry control only. While active, the
+  profile control stays available: choosing any normal profile exits
+  Cinematic editing and returns to that profile in one step. The inline
+  **Turn off** control remains the quick return to the prior profile.
+
+## 2.8.11 - Editor hierarchy refresh
+
+- Reworks the Frame Gambit editor into a clearer three-part workspace:
+  **Targets** on the left, ordered live rules in the center, and a wider
+  **Transition & relationships** inspector on the right.
+- Moves profile and mode controls into a more legible header hierarchy, puts
+  rule copy/paste alongside the rule workspace, and keeps the footer honest:
+  changes apply live and never need a separate save step.
+- Gives the inspector distinct Transition and Relationships sections, with
+  room for the existing safe timing, outline, marker, and connection controls.
+
+## 2.8.10 - Restored reaction cards
+
+- Fixes a Boolean check in the AND-compatibility guard that incorrectly hid
+  every card in the normal Add reaction picker. Compatibility filtering now
+  applies only while editing AND requirements.
+
+## 2.8.9 - Centered drag cards
+
+- The condition text on a dragged reaction card now uses the same centered
+  alignment as its stationary row.
+
+## 2.8.8 - Focused quest moments
+
+- Quest moment cards are now mutually exclusive as AND requirements. This
+  prevents redundant combinations such as Quest accepted + Quest updated;
+  use separate ordered reactions when different quest events need responses.
+  Loot window opened and Looted an item remain combinable.
+
+## 2.8.7 - Compatible travel requirements
+
+- Adds mutually-exclusive travel-mode guardrails. Pet battle cannot be
+  combined with another travel state; Vehicle, Flight path, and Fishing are
+  exclusive modes. Valid pairs such as Flying + Dragonriding and Swimming +
+  Underwater remain available.
+
+## 2.8.6 - Reliable reaction reordering and Delve context
+
+- Reaction dragging now uses a dedicated full-card visual ghost beneath the
+  cursor, while the original cards safely make a live, card-sized gap at the
+  destination. The former thin insertion line has been removed.
+- **In Delve** is now mutually exclusive with every other specific instance
+  location, including Arena, Dungeon, Raid instance, Battleground, Scenario,
+  and open world.
+
+## 2.8.4 - Cleaner target search and compatible AND requirements
+
+- Removes the Managed-only filter now that the target rail is always a tree.
+  The rail now uses an indented **Search frames** field with a search icon.
+- The AND-requirements picker now prevents combinations that Retail state APIs
+  guarantee cannot be true together, including mutually exclusive group and
+  instance contexts. Invalid choices are greyed out with an explanation.
+- Older or imported impossible combinations are kept safely for manual
+  cleanup, highlighted red, and remain clickable to remove.
+
+## 2.8.3 - Easier AND requirement recall
+
+- Category navigation now shows a small teal corner marker wherever that
+  category already contains an added AND requirement for the reaction.
+- Hovering a reaction's `+N` requirements button now lists the base condition
+  and every added requirement, so the complete match is visible at a glance.
+
+## 2.8.2 - Clearer condition categories
+
+- Gives the Add reaction and Add requirements category row its own inset
+  **CATEGORIES** navigation rail. Categories now use muted labels and a thin
+  active underline, distinct from the raised condition cards they reveal.
+
+## 2.8.1 - Tree-only target rail
+
+- Removes the List/Tree switch. The target rail now always presents managed
+  frames as their visibility hierarchy, with linked children indented below
+  their parent. Dragging a managed frame onto another managed frame is always
+  available for creating that relationship.
+
 ## 2.8.0 - Corrected public package
 
 - Corrects the malformed 2.6.0/2.7.0 public ZIPs so Frame Gambit loads and

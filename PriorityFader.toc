@@ -2,7 +2,7 @@
 ## Title: Frame Gambit
 ## Notes: Friendly, priority-based visibility gambits for your UI.
 ## Author: Mimezu
-## Version: 2.8.0
+## Version: 2.9.0
 ## SavedVariables: PriorityFaderDB
 ## OptionalDeps: EllesmereUI, EllesmereUIDamageMeters, EllesmereUIQuickdraw, OPie, DialogueUI, Details, SpeedyAutoLoot
 ## IconTexture: Interface\Icons\Spell_Mage_ArcaneOrb

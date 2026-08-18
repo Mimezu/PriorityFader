@@ -203,8 +203,6 @@ local function FindControl(kind)
         return nil
     end
     if kind == "otherwise" then return panel.otherwiseRow end
-    if kind == "managed" then return panel.managedOnlyButton end
-    if kind == "tree" then return panel.treeViewButton end
     if kind == "filter" then return panel.targetFilter end
     if kind == "outline" then return panel.outlineButton or (panel.selectionOutlineEnabled and ns.SelectionOutline) end
     if kind == "cinematic" then return panel.cinematic end
@@ -290,7 +288,6 @@ end
 local function StartTutorialTarget(tutorial, resume)
     local panel = ns.Options
     tutorial.previousSelected = panel and panel.selected or nil
-    tutorial.previousManagedOnly = panel and panel.managedOnly or false
     tutorial.previousQuery = panel and panel.targetQuery or ""
     local frame = EnsureTutorialFrame()
     tutorial.frame = frame
@@ -298,7 +295,7 @@ local function StartTutorialTarget(tutorial, resume)
     if not id then return false, reason end
     tutorial.targetID = id
     if panel then
-        panel.managedOnly, panel.targetQuery = false, ""
+        panel.targetQuery = ""
         if panel.targetFilter then panel.targetFilter:SetText("") end
         -- Step 3 onward needs the real editor to be looking at the temporary
         -- target. Step 2 deliberately leaves selection to the player.
@@ -327,7 +324,6 @@ local function CleanupTutorialTarget(tutorial)
     if id and ns.CanForgetCustomTarget and ns:CanForgetCustomTarget(id) then ns:ForgetCustomTarget(id) end
     if frame then frame:SetAlpha(1); frame:Hide() end
     if ns.Options then
-        ns.Options.managedOnly = tutorial.previousManagedOnly == true
         ns.Options.targetQuery = tutorial.previousQuery or ""
         if ns.Options.targetFilter then ns.Options.targetFilter:SetText(ns.Options.targetQuery) end
         if tutorial.previousSelected and ns.TargetByID[tutorial.previousSelected] then ns.Options.selected = tutorial.previousSelected end
