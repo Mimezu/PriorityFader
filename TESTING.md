@@ -69,7 +69,7 @@ active profile, graph consistency, and currently unavailable adapters.
    PvP, Calendar, Professions, Macro, Key Bindings, and Escape. None may open
    invisibly or retain mouse input; closing it returns that window to the
    Cinematic blackout.
-9. Press the orange Cinematic header button. The main editor must stay open,
+9. Press **Cinematic mode edit**. The main editor must stay open,
    gain its orange border and show a separate inline Cinematic strip without
    covering the subtitle or Presence
    panel. Managed dots and live-state accents must be orange; unavailable
@@ -216,7 +216,7 @@ active profile, graph consistency, and currently unavailable adapters.
    enabled. Toggling in combat must refuse without entering a partial scene.
    Enter combat while cinematic is active and verify alpha-only transitions
    continue without protected-action errors.
-6. Enter Cinematic from the orange header button. The normal editor must be
+6. Enter Cinematic from **Cinematic mode edit**. The normal editor must be
    the only place to edit targets and ordered rules; no dedicated Cinematic
    page or duplicate quick-mode rows may appear. Its inline strip must expose
    Cinematic: On, Shortcut, and Black bars only.
@@ -230,9 +230,12 @@ active profile, graph consistency, and currently unavailable adapters.
 
 ## Cinematic editor identity
 
-1. Click the orange Cinematic header button while the mode is off. It must
+1. Click **Cinematic mode edit** while the mode is off. Its background and
+   border must match a normal header action while only its label is amber. It
+   must then
    enter the normal editor on `Editing: Cinematic`, show the inline controls,
-   and apply the restrained amber outer-border identity.
+   apply the restrained amber outer-border identity, and turn itself fully
+   amber as a visible editing-status marker.
 2. Confirm ordinary target rows, reaction controls, and action buttons remain
    lavender. Only the live profile cue, subtitle, outer editor border, and
    Cinematic strip should use warm amber.
@@ -246,7 +249,7 @@ active profile, graph consistency, and currently unavailable adapters.
 ## Editor hierarchy
 
 1. Open the normal editor at its default size. Confirm the header reads left
-   to right as Help, Peek, Profile, then Cinematic; the version text must not
+   to right as Help, Preview, Profile, then Cinematic mode edit; the version text must not
    collide with those controls.
 2. Confirm the body has three clear work areas: **Targets**, the selected
    frame's ordered rules (including the first-match hint and Copy/Paste), and
@@ -262,8 +265,9 @@ active profile, graph consistency, and currently unavailable adapters.
    mirrored triangle icons rather than missing-font squares. The remove X must
    use a muted deep-red border/text treatment. Start a reaction drag and
    confirm the ghost repeats those same icons.
-5. In normal mode, Cinematic is a header entry action. Once active, **Turn
-   off** in the inline strip must return to the prior profile, while the
+5. In normal mode, **Cinematic mode edit** is a normal-style header entry
+   action with an amber label. Once active it becomes a full amber, non-exit
+   status marker; **Turn off** in the inline strip must return to the prior profile, while the
    **Editing: Cinematic** profile control must open the profile picker. Choose
    a normal profile there and verify it exits Cinematic editing and switches
    to that profile without an editor notice.

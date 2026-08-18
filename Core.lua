@@ -1,7 +1,7 @@
 local ADDON, ns = ...
 
 ns.NAME = "Frame Gambit"
-ns.VERSION = "2.9.0"
+ns.VERSION = "2.10.0"
 BINDING_HEADER_PRIORITYFADER = "Frame Gambit"
 BINDING_NAME_PRIORITYFADER_TOGGLE_CINEMATIC = "Toggle Frame Gambit Cinematic Mode"
 ns.MAX_REACTIONS_PER_TARGET = 32

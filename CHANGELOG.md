@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.10.0 - Clearer Cinematic editor entry
+
+- Renames the header action to **Cinematic mode edit**. When inactive it uses
+  the normal button treatment with an amber label; while editing Cinematic it
+  remains visible as a full amber status marker, with scene exit continuing
+  to live in the inline **Turn off** control.
+
 ## 2.9.0 - Editor and Cinematic refinement release
 
 - Reworks the main editor into a clearer Targets, ordered reactions, and

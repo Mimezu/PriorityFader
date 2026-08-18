@@ -392,11 +392,14 @@ function ns:ApplyEditorTheme(force)
         panel.header:SetBackdropColor(unpack(NORMAL_HEADER))
     end
     if panel and panel.cinematic then
-        panel.cinematic._selected = true
-        panel.cinematic._selectedColor = CINEMATIC_BUTTON
-        panel.cinematic:SetBackdropColor(unpack(CINEMATIC_BUTTON))
-        panel.cinematic:SetBackdropBorderColor(unpack(CINEMATIC_ACCENT))
-        panel.cinematic:GetFontString():SetText("Cinematic")
+        -- Off-state: this is a normal editor action with an amber name, not a
+        -- second amber panel.  Active-state: it becomes the clear Cinematic
+        -- editing identity marker while the scene controls live below.
+        panel.cinematic._selected = cinematic
+        panel.cinematic._selectedColor = cinematic and CINEMATIC_BUTTON or nil
+        panel.cinematic:SetBackdropColor(unpack(cinematic and CINEMATIC_BUTTON or C.cardAlt))
+        panel.cinematic:SetBackdropBorderColor(unpack(cinematic and CINEMATIC_ACCENT or C.border))
+        panel.cinematic:GetFontString():SetText("Cinematic mode edit")
         panel.cinematic:GetFontString():SetTextColor(unpack(CINEMATIC_ACCENT))
     end
     if panel and panel.subtitle then
@@ -583,13 +586,13 @@ function ns:CreateOptions()
     profile.label = Text(profile, "GameFontNormalSmall", "Profile: Default", C.accent)
     profile.label:SetPoint("LEFT", 8, 0); profile.label:SetPoint("RIGHT", profile.arrow, "LEFT", -2, 0); profile.label:SetJustifyH("CENTER"); profile.label:SetWordWrap(false)
     panel.profile = profile
-    local cinematic = Button(header, "Cinematic", 88, function()
+    local cinematic = Button(header, "Cinematic mode edit", 144, function()
         local ok, reason = ns:ToggleCinematic(true)
         if not ok then ns:ShowEditorNotice(reason or "Cinematic Mode could not be toggled.", "amber") end
         ns:RenderOptions()
     end)
     cinematic:SetPoint("TOPRIGHT", header, "TOPRIGHT", -58, -18); panel.cinematic = cinematic
-    SetTooltip(cinematic, "Edit Cinematic Mode", "Enters the dedicated Cinematic profile in this familiar editor. The orange border means changes are live.")
+    SetTooltip(cinematic, "Edit Cinematic Mode", "Enter the dedicated Cinematic profile in this familiar editor. Its full amber state means you are editing Cinematic now.")
     local peek = Button(header, "Preview", 76, function() ns:EnterEditorPeek() end)
     peek:SetPoint("RIGHT", profile, "LEFT", -7, 0)
     SetTooltip(peek, "Preview game UI", "Temporarily collapses the editor while keeping the selected frame outlined. Click the small return bar to continue editing.")
@@ -2478,7 +2481,7 @@ function ns:RenderOptions()
     if panel.profile then
         local cinematicActive = self:IsCinematicActive()
         panel.profile.label:SetText(cinematicActive and "Editing: Cinematic" or ("Profile: " .. ShortText(PriorityFaderDB.profile or "Default", 16)))
-        panel.profile:ClearAllPoints(); panel.profile:SetPoint("TOPRIGHT", panel.header, "TOPRIGHT", cinematicActive and -58 or -154, -18)
+        panel.profile:ClearAllPoints(); panel.profile:SetPoint("TOPRIGHT", panel.cinematic, "TOPLEFT", -8, 0)
         panel.profile.arrow:Show()
         panel.profile.label:ClearAllPoints(); panel.profile.label:SetPoint("LEFT", 8, 0)
         if cinematicActive then panel.profile.label:SetPoint("RIGHT", -8, 0) else panel.profile.label:SetPoint("RIGHT", panel.profile.arrow, "LEFT", -2, 0) end
@@ -2486,7 +2489,11 @@ function ns:RenderOptions()
         panel.profile:SetBackdropBorderColor(unpack(cinematicActive and CINEMATIC_ACCENT or C.border))
         panel.profile.label:SetTextColor(unpack(cinematicActive and CINEMATIC_ACCENT or C.accent))
         panel.profile:EnableMouse(true)
-        panel.cinematic:SetShown(not cinematicActive)
+        panel.cinematic:SetShown(true)
+        -- The inline Turn off action owns scene exit. The filled header button
+        -- is a status marker during editing, avoiding two controls that do the
+        -- same thing.
+        panel.cinematic:EnableMouse(not cinematicActive)
     end
     if not panel.selected or not self.TargetByID[panel.selected] then
         panel.selected = nil
