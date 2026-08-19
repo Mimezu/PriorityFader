@@ -19,7 +19,7 @@ or create a complete Cinematic setup for questing and screenshots.
 - Order reactions by priority—the first matching reaction controls the frame.
 - Reveal related frames together with hover groups and parent/child links.
 - Adjust fade speed, wait time, and resting opacity for each frame.
-- Pick frames directly on screen and preview them before editing.
+- Pick frames directly on screen and preview the result while editing.
 - Save different profiles and share them with friends.
 - Build a separate Cinematic Mode with black bars and its own shortcut.
 
@@ -38,7 +38,8 @@ whole row to change its priority whenever you like.
 
 Frame Gambit includes conditions for combat, mouseover, targets, casting,
 movement, class and spec, forms, stealth, pets, groups, instances, world
-locations, quest moments, travel states, and more. Add the same kind of
+states, quest moments, travel states, and more. World states currently include
+resting, PvP flagging, War Mode, indoors, and outdoors. Add the same kind of
 condition more than once when a setup needs several different variations.
 
 | Presence conditions | Travel conditions |
@@ -59,8 +60,9 @@ an objective, or turn something in, then fade away again when you are done.
 Some parts of the UI belong together. Frame Gambit can treat them that way:
 
 - **Hover group:** hovering one frame reveals the whole group.
-- **Linked child:** a child can reveal its parent when needed.
-- **Visibility child:** a child follows the visibility of its parent.
+- **Linked child:** hovering the source reveals its linked child.
+- **Visibility child:** the child's own rules run first; when none match, it
+  follows the parent's final opacity.
 
 This is useful for Details windows, unit-frame families, bars, and any custom
 layout where several frames should feel like one piece of UI.
@@ -76,9 +78,10 @@ the same rules you already know.
 
 ## Profiles and sharing
 
-Create profiles for different characters, specs, activities, or moods and
-switch between them whenever you like. Profiles can be exported and sent to
-friends, even when their UI setup is not exactly the same as yours.
+Create named profiles for different activities or UI setups and switch between
+them whenever you like. Profiles can be exported and sent to friends. Shared
+targets are adapted to the recipient's available UI, while frames they do not
+have are skipped.
 
 ## Built-in help
 
@@ -96,8 +99,9 @@ then removes it when the lesson is finished.
 ## Compatibility
 
 Frame Gambit is made for Retail WoW and works with Blizzard frames as well as
-supported addon UI. It changes frame opacity only; the original UI keeps
-control of its layout, styling, and behavior.
+supported addon UI. Its frame rules change opacity rather than moving,
+restyling, or reparenting the UI; the original owner keeps control of layout
+and behavior.
 
 For addon integrations and technical details, see [INTEGRATION.md](INTEGRATION.md).
 
