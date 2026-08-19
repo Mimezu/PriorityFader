@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 2.12.0 - Clean standalone release
+
+- Ships one install folder: `FrameGambit`. The temporary Priority Fader
+  SavedVariables bridge and its release packaging have been removed.
+- Rewrites the README around what players can do with the addon, with concise
+  feature explanations and screenshots instead of development history.
+- Keeps legacy slash commands, integration aliases, and old profile-export
+  imports available for players who still use them.
+
 ## 2.11.0 - Frame Gambit public milestone
 
 - Completes the Frame Gambit package rename with a safe Priority Fader

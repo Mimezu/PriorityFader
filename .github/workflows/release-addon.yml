@@ -41,18 +41,15 @@ jobs:
         run: |
           STAGE="$(mktemp -d)"
           mkdir -p "$STAGE/FrameGambit"
-          mkdir -p "$STAGE/PriorityFader"
           rsync -a \
             --exclude=".git" \
             --exclude=".github" \
-            --exclude="LegacyMigration" \
             --exclude="*.zip" \
             --exclude=".DS_Store" \
             ./ "$STAGE/FrameGambit/"
-          rsync -a ./LegacyMigration/ "$STAGE/PriorityFader/"
           (
             cd "$STAGE"
-            zip -qr "$GITHUB_WORKSPACE/FrameGambit.zip" "FrameGambit" "PriorityFader"
+            zip -qr "$GITHUB_WORKSPACE/FrameGambit.zip" "FrameGambit"
           )
 
       - name: Publish GitHub Release

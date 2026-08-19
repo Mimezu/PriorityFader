@@ -1,145 +1,107 @@
 # Frame Gambit
 
-Frame Gambit is a World of Warcraft addon by **Mimezu** for approachable, ordered frame-visibility rules. It can manage Blizzard and addon-owned UI frames while leaving their layout, styling, and gameplay behavior with the original UI addon.
+**Hide the UI you do not need. Bring it back exactly when you do.**
 
-Highlights include:
+Frame Gambit lets you decide when each part of your World of Warcraft UI
+appears. Keep your screen clean while exploring, reveal important frames in
+combat or on mouseover, bring back the Objective Tracker when a quest updates,
+or create a complete Cinematic setup for questing and screenshots.
 
-- ordered, first-match visibility reactions;
-- composite built-in targets for split UIs such as complete Details windows;
-- mouseover groups and parent/child reveal relationships;
-- visual frame discovery and selection;
-- a configurable Cinematic Mode for an uncluttered questing view;
-- viewer-level Cooldown Manager fading that composes with EllesmereUI;
-- profiles, import/export, diagnostics, and native keybinding support.
+[**Download the latest version**](https://github.com/Mimezu/PriorityFader/releases/latest/download/FrameGambit.zip)
 
-## See Frame Gambit in action
+![Frame Gambit editor](.github/readme/editor-overview.png)
 
-### Build ordered visibility rules
+## What you can do
 
-![Frame Gambit editor with ordered reactions and frame relationships](.github/readme/editor-overview.png)
+- Fade Blizzard and addon frames without changing their layout or style.
+- Choose when each frame appears: combat, mouseover, casting, movement,
+  targets, travel, quests, group content, and more.
+- Order reactions by priority—the first matching reaction controls the frame.
+- Reveal related frames together with hover groups and parent/child links.
+- Adjust fade speed, wait time, and resting opacity for each frame.
+- Pick frames directly on screen and preview them before editing.
+- Save different profiles and share them with friends.
+- Build a separate Cinematic Mode with black bars and its own shortcut.
 
-Choose a Blizzard or addon frame, stack its reactions in priority order, then
-tune transitions and relationships from the same editor. The first matching
-reaction wins.
+## Simple rules, powerful results
 
-### React to live gameplay moments
+Choose a frame, add the moments when you want to see it, and set what happens
+the rest of the time. Reactions are checked from top to bottom, so your most
+important rule should be first.
 
-![Objective Tracker reacting to quest events](.github/readme/live-objectives.png)
+Every reaction can be turned off without deleting it. You can also drag the
+whole row to change its priority whenever you like.
 
-Frames can return for mouseover, combat, quest events, and many other useful
-moments. Frame Preview makes the selected target easy to identify in-game.
+![Dragging a reaction to a new priority](.github/readme/drag-priority.png)
 
-### Fine-tune Cinematic Mode
+## Conditions for the way you play
 
-![Cinematic Mode profile editor](.github/readme/cinematic-editor.png)
-
-Cinematic Mode has its own editable profile, black bars, and shortcut while
-using the same familiar rule editor. Changes are applied live.
-
-### Pick clear, reusable conditions
+Frame Gambit includes conditions for combat, mouseover, targets, casting,
+movement, class and spec, forms, stealth, pets, groups, instances, world
+locations, quest moments, travel states, and more. Add the same kind of
+condition more than once when a setup needs several different variations.
 
 | Presence conditions | Travel conditions |
 | --- | --- |
 | ![Presence condition picker](.github/readme/reaction-picker-presence.png) | ![Travel condition picker](.github/readme/reaction-picker-travel.png) |
-| Add combat, mouseover, movement, form, spec, stealth, and input conditions. | React to mounted, flying, skyriding, fishing, vehicles, swimming, and more. |
+| Combat, mouseover, movement, casting, forms, specs, stealth, and input keys. | Mounted, flying, skyriding, fishing, vehicles, swimming, flight paths, and more. |
 
-### Reorder priorities directly
+## Bring frames back at the right moment
 
-![Dragging a reaction to a new priority](.github/readme/drag-priority.png)
+Your UI can react to short gameplay moments as well as ongoing states. For
+example, the Objective Tracker can appear when you accept a quest, complete
+an objective, or turn something in, then fade away again when you are done.
 
-Drag the whole reaction into place. The surrounding rows move out of the way
-so the new first-match priority is clear before you drop it.
+![Objective Tracker reacting to quest events](.github/readme/live-objectives.png)
 
-## Help and guided tutorial
+## Frame relationships
 
-Open **? Help** from the editor header for short explanations of the Gambit
-flow, relationships, Cinematic Mode, and safe integrations. The Help window
-can be moved independently, but closes with the editor. **Start guided
-tutorial** launches a non-destructive walkthrough with a temporary portrait
-**Tutorial Frame**, contextual spotlights, and real editor actions. Its
-temporary target and lesson rules are removed when the tour ends, is skipped,
-or is interrupted; your profile is never changed.
+Some parts of the UI belong together. Frame Gambit can treat them that way:
 
-## Conditions
+- **Hover group:** hovering one frame reveals the whole group.
+- **Linked child:** a child can reveal its parent when needed.
+- **Visibility child:** a child follows the visibility of its parent.
 
-Reactions may use **Class pet active** for a player's combat pet (such as a
-Hunter or Warlock pet), or **Cosmetic companion active** for a summoned Pet
-Journal companion. These are separate conditions; Frame Gambit intentionally
-does not provide an ambiguous "any pet" condition.
+This is useful for Details windows, unit-frame families, bars, and any custom
+layout where several frames should feel like one piece of UI.
 
-Picker cards use a shared, explicit **Yes / No** segment: the filled answer is
-the one the row matches. **Movement: Yes** means moving; **Movement: No**
-means stationary. Use **Form** to choose a supported gameplay form and then
-whether it should be active (**Yes**) or inactive (**No**). Form rows for
-another class/spec remain saved but are visibly muted and skipped, so one
-profile can cover multiple specs. Available choices are Druid forms,
-Shadowform, Ghost Wolf, and Demon Hunter Metamorphosis (including Devourer
-Void Metamorphosis). Configurable cards
-are repeatable: add as many as needed, then order them like any other gambit.
-The **Spec** card first chooses a class, then its spec; other-class rows are
-retained, greyed out, and skipped so a shared profile can cover alts or future
-spec changes.
-The presence list also includes **Stealthed / invisible**; travel includes
-**Fishing**; and Group & instance includes **In Delve**.
+## Cinematic Mode
 
-Every reaction row has an **On/Off** switch. Off rows stay in their place with
-their complete setup intact, but never match until turned back on.
+Cinematic Mode gives you a cleaner view of the world without losing your
+normal profile. It has its own frame rules, optional black bars, and a
+keybindable shortcut. Open the Cinematic editor to fine-tune the scene using
+the same rules you already know.
 
-## Sharing profiles
+![Cinematic Mode profile editor](.github/readme/cinematic-editor.png)
 
-Profile exports are portable between different UI setups. On import, Frame
-Gambit resolves each stable target through the recipient's own Blizzard and
-addon adapters. Targets that do not exist on that installation are skipped,
-along with relationships that depended on them; compatible targets and rules
-still import normally. The import result reports how many targets were kept
-and how many unavailable targets were skipped.
+## Profiles and sharing
+
+Create profiles for different characters, specs, activities, or moods and
+switch between them whenever you like. Profiles can be exported and sent to
+friends, even when their UI setup is not exactly the same as yours.
+
+## Built-in help
+
+The Help window explains the main features in plain language. A guided
+tutorial also lets you practice on a temporary frame inside the real editor,
+then removes it when the lesson is finished.
 
 ## Installation
 
-[**Download the latest install-ready ZIP**](https://github.com/Mimezu/PriorityFader/releases/latest/download/FrameGambit.zip)
+1. [Download the latest ZIP](https://github.com/Mimezu/PriorityFader/releases/latest/download/FrameGambit.zip).
+2. Extract `FrameGambit` into `World of Warcraft/_retail_/Interface/AddOns/`.
+3. Start WoW or reload the UI.
+4. Open Frame Gambit with `/fg` or `/framegambit`.
 
-The release ZIP contains the `FrameGambit` addon and the small
-`PriorityFader` migration bridge for existing users.
+## Compatibility
 
-Place this folder at:
+Frame Gambit is made for Retail WoW and works with Blizzard frames as well as
+supported addon UI. It changes frame opacity only; the original UI keeps
+control of its layout, styling, and behavior.
 
-```text
-World of Warcraft/_retail_/Interface/AddOns/FrameGambit
-```
-
-Reload the UI, then open the addon with:
-
-```text
-/framegambit
-/fg
-```
-
-## Updating from Priority Fader
-
-The transition ZIP contains **two folders**: `FrameGambit` and a tiny
-`PriorityFader` settings bridge. Extract both of them. The bridge loads your
-existing `PriorityFader.lua` data and gives it to the new addon before login.
-Your profiles, targets, reactions,
-relationships, Cinematic configuration, tutorial progress, and Cinematic
-shortcut are retained.
-
-1. Exit World of Warcraft completely.
-2. Extract **both** folders from the Frame Gambit transition ZIP, replacing the
-   old `PriorityFader.toc` with the small migration bridge.
-3. **Do not delete SavedVariables.** Start the game and the conversion happens
-   automatically.
-
-`/pfader`, `/priorityfader`, and the old integration API remain as quiet
-compatibility aliases for existing macros and addon integrations. New use
-should prefer `/fg` and `FrameGambitAPI`. After the migration release is no
-longer needed, the bridge folder can be removed safely.
-
-## Design boundary
-
-Frame Gambit is an alpha-only presentation layer. It does not rewrite another addon's saved settings, reparent its frames, or replace its styling. See [MIGRATION.md](MIGRATION.md), [INTEGRATION.md](INTEGRATION.md), [ROADMAP.md](ROADMAP.md), and [TESTING.md](TESTING.md) for migration, integration contracts, current limitations, and the release test matrix.
+For addon integrations and technical details, see [INTEGRATION.md](INTEGRATION.md).
 
 ## Releases
 
-GitHub publishes an install-ready ZIP for milestone releases. The permanent
-[latest release page](https://github.com/Mimezu/PriorityFader/releases/latest)
-always points to the newest public build.
+Visit the [latest release page](https://github.com/Mimezu/PriorityFader/releases/latest)
+for the newest install-ready build.

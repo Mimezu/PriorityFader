@@ -1,9 +1,0 @@
-## Interface: 120100
-## Title: Frame Gambit settings migration
-## Notes: Temporary settings bridge for the Frame Gambit package rename.
-## Author: Mimezu
-## Version: 2.11.0
-## RequiredDeps: FrameGambit
-## SavedVariables: PriorityFaderDB
-
-LegacySettingsBridge.lua

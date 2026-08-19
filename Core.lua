@@ -1,7 +1,7 @@
 local ADDON, ns = ...
 
 ns.NAME = "Frame Gambit"
-ns.VERSION = "2.11.0"
+ns.VERSION = "2.12.0"
 BINDING_HEADER_FRAMEGAMBIT = "Frame Gambit"
 BINDING_NAME_FRAMEGAMBIT_TOGGLE_CINEMATIC = "Toggle Frame Gambit Cinematic Mode"
 local CINEMATIC_BINDING = "FRAMEGAMBIT_TOGGLE_CINEMATIC"
@@ -348,37 +348,6 @@ local function DeepCopy(value, seen)
     seen[value] = copy
     for key, child in pairs(value) do copy[DeepCopy(key, seen)] = DeepCopy(child, seen) end
     return copy
-end
-
--- Frame Gambit is the primary saved-variable name. The legacy variable is
--- intentionally declared in the TOC for this transition, allowing an update
--- to adopt existing Priority Fader profiles after the old addon folder has
--- been removed. Both globals point to the same table for the rest of this
--- session, so the migration never needs to guess how to merge two profiles.
-function ns:AdoptLegacySettings(legacyOverride, force)
-    local legacy = type(legacyOverride) == "table" and legacyOverride
-        or (type(PriorityFaderDB) == "table" and PriorityFaderDB or nil)
-    local function HasStoredConfiguration(db)
-        return type(db) == "table" and (type(db.profiles) == "table" and next(db.profiles) ~= nil
-            or type(db.customTargets) == "table" and next(db.customTargets) ~= nil
-            or type(db.cinematic) == "table" and next(db.cinematic) ~= nil)
-    end
-    if legacy and (force or type(FrameGambitDB) ~= "table"
-        or (FrameGambitDB.renameMigration ~= true and HasStoredConfiguration(legacy) and not HasStoredConfiguration(FrameGambitDB))) then
-        FrameGambitDB = legacy
-    end
-    FrameGambitDB = type(FrameGambitDB) == "table" and FrameGambitDB or {}
-    FrameGambitDB.renameMigration = true
-    FrameGambitDB.renameMigrationVersion = 2
-    PriorityFaderDB = FrameGambitDB
-    return FrameGambitDB
-end
-
--- Called by the one-release PriorityFader settings bridge. It must run before
--- PLAYER_LOGIN, when the old package's SavedVariables file is still available.
-function FrameGambit_AdoptLegacySettings(legacy)
-    if type(FrameGambitDB) == "table" and FrameGambitDB.renameMigrationVersion == 2 then return true end
-    return ns:AdoptLegacySettings(legacy, true) ~= nil
 end
 
 function ns:Profile()
@@ -3540,7 +3509,7 @@ driver:SetScript("OnEvent", function(_, event, ...)
         end
     end
     if event == "PLAYER_LOGIN" then
-        ns:AdoptLegacySettings()
+        FrameGambitDB = type(FrameGambitDB) == "table" and FrameGambitDB or {}
         FrameGambitDB = CopyDefaults(DEFAULTS, FrameGambitDB)
         ns:MigrateDatabase()
         ns:MigrateLegacyCinematicBinding()

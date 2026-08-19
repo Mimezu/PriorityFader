@@ -44,23 +44,16 @@ active profile, graph consistency, and currently unavailable adapters.
    Selecting the imported profile must never add a ghost target or fail because
    a sender-only addon is absent.
 
-## Priority Fader → Frame Gambit migration
+## Legacy compatibility
 
-1. With an existing `PriorityFader.lua` SavedVariables file and no
-   `FrameGambit.lua`, install the transition ZIP. It must provide the new
-   `FrameGambit` addon and the minimal `PriorityFader` settings bridge. Log in
-   and confirm the selected profile, every target, reaction, relationship,
-   custom target, Cinematic setting, and tutorial state match the old
-   configuration before any rule evaluates. The bridge must not load any old
-   Frame Gambit UI or evaluator code.
-2. Confirm a prior Cinematic keybind is now assigned to
+1. Confirm a prior Cinematic keybind is now assigned to
    **Toggle Frame Gambit Cinematic Mode**. Assign a different new keybind,
    reload, and confirm the new binding wins over any remaining legacy value.
-3. Open an old `PriorityFader-1:` profile export and import it successfully.
+2. Open an old `PriorityFader-1:` profile export and import it successfully.
    Export the same profile and confirm its prefix is `FrameGambit-1:`.
-4. Confirm `/fg` and `/framegambit` open the editor. Existing `/pfader` and
+3. Confirm `/fg` and `/framegambit` open the editor. Existing `/pfader` and
    `/priorityfader` macros must continue opening the same Frame Gambit editor.
-5. Verify `FrameGambitAPI.RegisterTarget` and the legacy
+4. Verify `FrameGambitAPI.RegisterTarget` and the legacy
    `PriorityFaderAPI.RegisterTarget` both register the same safe external
    target without creating duplicate rows.
 
