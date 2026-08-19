@@ -180,11 +180,13 @@ end
 
 -- Tiny, versioned global surface.  Deliberately no configuration or profile
 -- access: a provider can register a frame, but cannot alter user rules.
-PriorityFaderAPI = PriorityFaderAPI or {}
-PriorityFaderAPI.version = 1
-function PriorityFaderAPI.RegisterTarget(definition)
+FrameGambitAPI = FrameGambitAPI or {}
+FrameGambitAPI.version = 1
+function FrameGambitAPI.RegisterTarget(definition)
     return ns:RegisterTarget(definition)
 end
+-- Kept for already-shipped integrations; new integrations use FrameGambitAPI.
+PriorityFaderAPI = FrameGambitAPI
 
 function ns:GetAvailableTargets()
     local available = {}
@@ -220,7 +222,7 @@ local function IsForbiddenFrame(frame)
     return SafeMethod(frame, "IsForbidden") == true
 end
 
-function ns:IsPriorityFaderFrame(frame)
+function ns:IsFrameGambitFrame(frame)
     if not frame then return false end
     local current, seen = frame, {}
     while current and not seen[current] do
@@ -238,7 +240,7 @@ function ns:IsPriorityFaderFrame(frame)
 end
 
 function ns:GetFramePickerRoot(frame)
-    if not frame or frame == UIParent or frame == WorldFrame or IsForbiddenFrame(frame) or self:IsPriorityFaderFrame(frame) then return nil end
+    if not frame or frame == UIParent or frame == WorldFrame or IsForbiddenFrame(frame) or self:IsFrameGambitFrame(frame) then return nil end
     local current, seen = frame, {}
     while current and not seen[current] do
         seen[current] = true
@@ -247,7 +249,7 @@ function ns:GetFramePickerRoot(frame)
         if not parent or parent == UIParent then break end
         current = parent
     end
-    if current == UIParent or current == WorldFrame or IsForbiddenFrame(current) or self:IsPriorityFaderFrame(current) then return nil end
+    if current == UIParent or current == WorldFrame or IsForbiddenFrame(current) or self:IsFrameGambitFrame(current) then return nil end
     return current
 end
 
@@ -421,7 +423,7 @@ function ns:GetUICursorPosition()
 end
 
 function ns:BuildPickerCandidate(frame)
-    if not frame or self:IsPriorityFaderFrame(frame) or IsForbiddenFrame(frame) then return nil end
+    if not frame or self:IsFrameGambitFrame(frame) or IsForbiddenFrame(frame) then return nil end
     -- Reject dormant branches before any ancestry walk or geometry reads.
     -- This is the main cost control on UIs with large hidden configuration
     -- trees and pooled widgets.
@@ -611,7 +613,7 @@ function ns:ContinuePickerAtlas(atlas, budget)
             if not atlas.seen[frame] then
                 atlas.seen[frame] = true
                 local visible = FrameTreeVisible(frame)
-                if visible and frame ~= WorldFrame and not self:IsPriorityFaderFrame(frame) then
+                if visible and frame ~= WorldFrame and not self:IsFrameGambitFrame(frame) then
                     local candidate = self:BuildPickerCandidate(frame)
                     if candidate and not atlas.seeded[frame] then
                         candidate.serial = atlas.inspected
@@ -737,7 +739,7 @@ end
 function ns:GetUIParentFrameRoots(includeHidden)
     local result = {}
     for _, root in ipairs(UIParentChildren()) do
-        if root and root ~= WorldFrame and not IsForbiddenFrame(root) and not self:IsPriorityFaderFrame(root) then
+        if root and root ~= WorldFrame and not IsForbiddenFrame(root) and not self:IsFrameGambitFrame(root) then
             local left
             if not includeHidden then
                 left = self:GetUsableFrameRect(root)
@@ -769,7 +771,7 @@ local EUI_UNIT_CHILDREN = {
 }
 
 function ns:GetEUIUnitFrameBoundary(frame)
-    local unwrap = frame and SafeMethod(frame, "GetPriorityFaderVisualFrame")
+    local unwrap = frame and SafeMethod(frame, "GetFrameGambitVisualFrame")
     if unwrap then frame = unwrap end
     local hider = _G[EUI_UNIT_HIDER]
     if not frame or not hider then return nil end
@@ -783,7 +785,7 @@ function ns:GetEUIUnitFrameBoundary(frame)
 end
 
 function ns:GetEUIUnitFrameOwner(frame)
-    local unwrap = frame and SafeMethod(frame, "GetPriorityFaderVisualFrame")
+    local unwrap = frame and SafeMethod(frame, "GetFrameGambitVisualFrame")
     if unwrap then frame = unwrap end
     local hider = self:GetEUIUnitFrameBoundary(frame)
     if not hider then return nil end
@@ -843,12 +845,12 @@ function ns:RegisterDiscoveredFrame(frame, label, exactFrame)
     local root = self:GetFramePickerRoot(frame)
     if not root then return nil, "That frame cannot be managed safely." end
     local managed = exactFrame and frame or root
-    if not IsUsableTargetFrame(managed) or IsForbiddenFrame(managed) or self:IsPriorityFaderFrame(managed) then
+    if not IsUsableTargetFrame(managed) or IsForbiddenFrame(managed) or self:IsFrameGambitFrame(managed) then
         return nil, "That frame cannot be managed safely."
     end
     for _, target in ipairs(self.Targets) do
         local existing = self:ResolveTarget(target.id)
-        local visual = existing and SafeMethod(existing, "GetPriorityFaderVisualFrame")
+        local visual = existing and SafeMethod(existing, "GetFrameGambitVisualFrame")
         if existing == managed or visual == managed then return target.id end
     end
     local controlled = self.Profile and self:Profile().targets or {}
@@ -875,8 +877,8 @@ function ns:RegisterDiscoveredFrame(frame, label, exactFrame)
             })
             if not registered then return nil, reason end
         end
-        PriorityFaderDB.customTargets = type(PriorityFaderDB.customTargets) == "table" and PriorityFaderDB.customTargets or {}
-        PriorityFaderDB.customTargets[id] = {
+        FrameGambitDB.customTargets = type(FrameGambitDB.customTargets) == "table" and FrameGambitDB.customTargets or {}
+        FrameGambitDB.customTargets[id] = {
             name = name,
             label = (type(label) == "string" and label ~= "" and label or name):sub(1, 64),
             exact = exactFrame == true,
@@ -899,7 +901,7 @@ function ns:RegisterDiscoveredFrame(frame, label, exactFrame)
 end
 
 function ns:RegisterStoredCustomFrames()
-    local stored = PriorityFaderDB and PriorityFaderDB.customTargets
+    local stored = FrameGambitDB and FrameGambitDB.customTargets
     if type(stored) ~= "table" then return end
     for id, entry in pairs(stored) do
         if type(id) == "string" and type(entry) == "table" and type(entry.name) == "string"
@@ -920,7 +922,7 @@ end
 
 function ns:CanForgetCustomTarget(id)
     if type(id) ~= "string" then return false end
-    local stored = PriorityFaderDB and PriorityFaderDB.customTargets
+    local stored = FrameGambitDB and FrameGambitDB.customTargets
     return (type(stored) == "table" and stored[id] ~= nil)
         or id:match("^session_frame_") ~= nil
 end
@@ -970,7 +972,7 @@ function ns:ForgetCustomTarget(id)
     end
     -- Restore the live frame before removing its resolver and catalog entry.
     if self.Profile and self:Profile().targets[id] then self:RemoveTarget(id) end
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     for _, profile in pairs(type(db.profiles) == "table" and db.profiles or {}) do
         RemoveTargetFromSavedProfile(profile, id)
     end

@@ -264,7 +264,7 @@ local function DrawInspectorIcon(parent, kind)
     icon:SetSize(42, 42); icon:EnableMouse(false)
     local index = ({ transition = 0, eye = 1, group = 2, link = 3, visibility = 4 })[kind] or 0
     local texture = icon:CreateTexture(nil, "OVERLAY")
-    texture:SetAllPoints(); texture:SetTexture("Interface\\AddOns\\PriorityFader\\Assets\\InspectorIcons")
+    texture:SetAllPoints(); texture:SetTexture("Interface\\AddOns\\FrameGambit\\Assets\\InspectorIcons")
     texture:SetTexCoord(index / 5, (index + 1) / 5, 0, 1)
     return icon
 end
@@ -279,12 +279,15 @@ end
 
 local function InspectorActionCard(parent, anchor, iconKind, title, enabled, callback)
     local card = Button(parent, "", 206, callback)
-    card:SetHeight(82); card:GetFontString():Hide(); card:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -8)
-    card.icon = DrawInspectorIcon(card, iconKind); card.icon:SetPoint("LEFT", 10, 0)
-    card.title = Text(card, "GameFontNormal", title, C.accent); card.title:SetPoint("TOPLEFT", 62, -17)
-    card.state = Text(card, "GameFontHighlightSmall", enabled and "On" or "Off", enabled and C.teal or C.muted); card.state:SetPoint("TOPLEFT", 62, -43)
-    card.switch = InspectorSwitch(card, enabled); card.switch:SetPoint("LEFT", card.state, "RIGHT", 8, 0)
-    card.arrow = CreateFrame("Frame", nil, card); card.arrow:SetSize(12, 12); card.arrow:SetPoint("RIGHT", -12, 0); DrawTriangle(card.arrow, "right")
+    card:SetHeight(70); card:GetFontString():Hide(); card:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -7)
+    card.icon = DrawInspectorIcon(card, iconKind); card.icon:SetSize(34, 34); card.icon:SetPoint("LEFT", 8, 0)
+    card.title = Text(card, "GameFontNormal", title, C.accent)
+    card.title:SetPoint("TOPLEFT", 52, -12); card.title:SetPoint("RIGHT", -24, 0)
+    card.title:SetJustifyH("LEFT"); card.title:SetWordWrap(false)
+    card.state = Text(card, "GameFontHighlightSmall", enabled and "On" or "Off", enabled and C.teal or C.muted)
+    card.state:SetPoint("TOPLEFT", 52, -39); card.state:SetWidth(20); card.state:SetJustifyH("LEFT")
+    card.switch = InspectorSwitch(card, enabled); card.switch:SetPoint("LEFT", 78, -12)
+    card.arrow = CreateFrame("Frame", nil, card); card.arrow:SetSize(12, 12); card.arrow:SetPoint("RIGHT", -10, 0); DrawTriangle(card.arrow, "right")
     return card
 end
 
@@ -399,7 +402,7 @@ function ns:ApplyEditorTheme(force)
         panel.cinematic._selectedColor = cinematic and CINEMATIC_BUTTON or nil
         panel.cinematic:SetBackdropColor(unpack(cinematic and CINEMATIC_BUTTON or C.cardAlt))
         panel.cinematic:SetBackdropBorderColor(unpack(cinematic and CINEMATIC_ACCENT or C.border))
-        panel.cinematic:GetFontString():SetText("Cinematic mode edit")
+        panel.cinematic:GetFontString():SetText(cinematic and "Exit cinematic edit" or "Cinematic mode edit")
         panel.cinematic:GetFontString():SetTextColor(unpack(CINEMATIC_ACCENT))
     end
     if panel and panel.subtitle then
@@ -512,7 +515,7 @@ end
 
 function ns:CreateOptions()
     if self.Options then return end
-    local panel = CreateFrame("Frame", "PriorityFaderOptions", UIParent, "BackdropTemplate")
+    local panel = CreateFrame("Frame", "FrameGambitOptions", UIParent, "BackdropTemplate")
     -- The editor is deliberately spacious: choosing a target, ordering its
     -- rules, and defining its relationships are three different jobs.
     panel:SetSize(math.min(1180, UIParent:GetWidth() - 40), math.min(680, UIParent:GetHeight() - 40))
@@ -532,7 +535,7 @@ function ns:CreateOptions()
     -- Keep the frame being edited visible in context without changing its
     -- alpha, mouse handling, or ownership. FULLSCREEN stays below this
     -- FULLSCREEN_DIALOG options panel, so the marker never paints over the UI.
-    local selectionOutline = CreateFrame("Frame", "PriorityFaderSelectionOutline", UIParent, "BackdropTemplate")
+    local selectionOutline = CreateFrame("Frame", "FrameGambitSelectionOutline", UIParent, "BackdropTemplate")
     selectionOutline:SetFrameStrata("FULLSCREEN"); selectionOutline:SetFrameLevel(850)
     selectionOutline:EnableMouse(false); selectionOutline:Hide()
     Backdrop(selectionOutline, { 0, 0, 0, 0 }, C.teal)
@@ -544,7 +547,7 @@ function ns:CreateOptions()
     self.SelectionOutline = selectionOutline
     panel.selectionOutlineEnabled = true
 
-    local peekBar = CreateFrame("Button", "PriorityFaderPeekBar", UIParent, "BackdropTemplate")
+    local peekBar = CreateFrame("Button", "FrameGambitPeekBar", UIParent, "BackdropTemplate")
     peekBar:SetSize(360, 38); peekBar:SetPoint("TOP", UIParent, "TOP", 0, -22)
     peekBar:SetFrameStrata("FULLSCREEN_DIALOG"); peekBar:SetFrameLevel(520)
     peekBar:EnableMouse(true); peekBar:RegisterForClicks("LeftButtonUp"); peekBar:Hide()
@@ -573,7 +576,8 @@ function ns:CreateOptions()
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
     panel.subtitle = subtitle
     local version = Text(header, "GameFontHighlightSmall", "v" .. self.VERSION .. "  •  Retail 12.1", C.teal)
-    version:Hide()
+    version:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", -10, 9)
+    panel.version = version
     local creator = Text(header, "GameFontHighlightSmall", "by Mimezu", C.muted)
     creator:Hide()
     local profile = Button(header, "Profile: Default", 150, function()
@@ -606,6 +610,15 @@ function ns:CreateOptions()
     subtitle:SetPoint("RIGHT", helpButton, "LEFT", -10, 0)
     subtitle:SetWordWrap(false)
     if subtitle.SetMaxLines then subtitle:SetMaxLines(1) end
+    local function UpdateHeaderComposition()
+        -- At the narrow resize breakpoint the descriptive sentence becomes a
+        -- weak, floating fifth column. The identity and action cluster are
+        -- clearer without it; the sentence returns automatically when space
+        -- is available again.
+        subtitle:SetShown(panel:GetWidth() >= 1080)
+    end
+    panel:HookScript("OnSizeChanged", UpdateHeaderComposition)
+    C_Timer.After(0, UpdateHeaderComposition)
     local helpDot = helpButton:CreateTexture(nil, "OVERLAY")
     helpDot:SetSize(5, 5); helpDot:SetPoint("TOPRIGHT", -3, -3); SetTealTexture(helpDot); helpDot:Hide()
     helpButton.tutorialDot = helpDot
@@ -614,40 +627,41 @@ function ns:CreateOptions()
         helpDot:SetShown(not completed)
     end
     local cinematicControls = CreateFrame("Frame", nil, header, "BackdropTemplate")
-    -- This is a genuine second header row. Keeping it below the subtitle
-    -- avoids squeezing black-bar controls across the title copy.
-    cinematicControls:SetPoint("BOTTOMLEFT", 8, 8); cinematicControls:SetPoint("BOTTOMRIGHT", -8, 8); cinematicControls:SetHeight(28)
+    -- The strip has two jobs only: scene framing and its shortcut. One quiet
+    -- divider groups those jobs without repeating the mode-exit action.
+    cinematicControls:SetPoint("BOTTOMLEFT", 8, 8); cinematicControls:SetPoint("BOTTOMRIGHT", -8, 8); cinematicControls:SetHeight(34)
     Backdrop(cinematicControls, C.cardAlt, CINEMATIC_BORDER); cinematicControls:Hide(); panel.cinematicControls = cinematicControls
-    local cinematicLabel = Text(cinematicControls, "GameFontHighlightSmall", "Scene", CINEMATIC_ACCENT)
-    cinematicLabel:SetPoint("LEFT", 10, 0); cinematicLabel:SetWidth(42)
-    cinematicControls.toggle = Button(cinematicControls, "Turn off", 78, function()
-        local ok, reason = ns:ToggleCinematic(true)
-        if not ok then ns:ShowEditorNotice(reason or "Cinematic Mode could not be toggled.", "amber") end
-        ns:RenderOptions()
-    end, true)
-    cinematicControls.toggle:SetPoint("LEFT", cinematicLabel, "RIGHT", 8, 0)
-    SetTooltip(cinematicControls.toggle, "Cinematic Mode", "Turn Cinematic Mode on or off without closing this editor.")
-    cinematicControls.shortcut = Button(cinematicControls, "Shortcut: Set", 122, function() ns:OpenCinematicKeyCapture() end)
-    cinematicControls.shortcut:SetPoint("RIGHT", -55, 0)
+    cinematicControls.shortcutGroup = CreateFrame("Frame", nil, cinematicControls)
+    cinematicControls.shortcutGroup:SetPoint("TOPRIGHT", -6, 0); cinematicControls.shortcutGroup:SetPoint("BOTTOMRIGHT", -6, 0)
+    cinematicControls.shortcutGroup:SetWidth(258)
+    cinematicControls.divider = cinematicControls:CreateTexture(nil, "ARTWORK")
+    cinematicControls.divider:SetColorTexture(C.border[1], C.border[2], C.border[3], 0.78)
+    cinematicControls.divider:SetSize(1, 20); cinematicControls.divider:SetPoint("RIGHT", cinematicControls.shortcutGroup, "LEFT", -9, 0)
+    cinematicControls.letterboxGroup = CreateFrame("Frame", nil, cinematicControls)
+    cinematicControls.letterboxGroup:SetPoint("TOPLEFT", 6, 0); cinematicControls.letterboxGroup:SetPoint("BOTTOMLEFT", 6, 0)
+    cinematicControls.letterboxGroup:SetPoint("RIGHT", cinematicControls.divider, "LEFT", -10, 0)
+    cinematicControls.shortcut = Button(cinematicControls.shortcutGroup, "Shortcut: Set", 192, function() ns:OpenCinematicKeyCapture() end)
+    cinematicControls.shortcut:SetPoint("LEFT", 0, 0); cinematicControls.shortcut:SetPoint("RIGHT", -50, 0)
     SetTooltip(cinematicControls.shortcut, "Cinematic shortcut", "Choose a shortcut for toggling Cinematic Mode outside combat.")
-    cinematicControls.clear = Button(cinematicControls, "Clear", 43, function()
+    cinematicControls.clear = Button(cinematicControls.shortcutGroup, "Clear", 43, function()
         local ok, reason = ns:SetCinematicBinding(nil)
         if not ok then ns:ShowEditorNotice(reason or "Cinematic shortcut could not be cleared.", "amber") end
         ns:RenderOptions()
     end)
-    cinematicControls.clear:SetPoint("RIGHT", -6, 0)
-    cinematicControls.letterboxLabel = Text(cinematicControls, "GameFontHighlightSmall", "Black bars 4%", C.muted)
-    cinematicControls.letterboxLabel:SetPoint("LEFT", cinematicControls.toggle, "RIGHT", 14, 0)
-    cinematicControls.letterboxToggle = Button(cinematicControls, "Off", 44, function()
+    cinematicControls.clear:SetPoint("RIGHT", 0, 0)
+    cinematicControls.letterboxLabel = Text(cinematicControls.letterboxGroup, "GameFontHighlightSmall", "Black bars 4%", C.muted)
+    cinematicControls.letterboxLabel:SetPoint("LEFT", 8, 0); cinematicControls.letterboxLabel:SetWidth(86)
+    cinematicControls.letterboxLabel:SetJustifyH("LEFT"); cinematicControls.letterboxLabel:SetWordWrap(false)
+    cinematicControls.letterboxToggle = Button(cinematicControls.letterboxGroup, "Off", 48, function()
         local enabled = ns:GetCinematicLetterboxSettings()
         ns:SetCinematicLetterboxEnabled(not enabled)
         ns:RenderOptions()
     end)
-    cinematicControls.letterboxToggle:SetPoint("RIGHT", cinematicControls.shortcut, "LEFT", -7, 0)
+    cinematicControls.letterboxToggle:SetPoint("RIGHT", -2, 0)
     SetTooltip(cinematicControls.letterboxToggle, "Cinematic black bars", "Add mouse-transparent letterbox bars at the top and bottom of the screen.")
-    cinematicControls.letterboxSlider = CreateFrame("Slider", nil, cinematicControls, "BackdropTemplate")
+    cinematicControls.letterboxSlider = CreateFrame("Slider", nil, cinematicControls.letterboxGroup, "BackdropTemplate")
     cinematicControls.letterboxSlider:SetPoint("LEFT", cinematicControls.letterboxLabel, "RIGHT", 10, 0)
-    cinematicControls.letterboxSlider:SetPoint("RIGHT", cinematicControls.letterboxToggle, "LEFT", -8, 0)
+    cinematicControls.letterboxSlider:SetPoint("RIGHT", cinematicControls.letterboxToggle, "LEFT", -10, 0)
     cinematicControls.letterboxSlider:SetHeight(9); cinematicControls.letterboxSlider:SetOrientation("HORIZONTAL")
     cinematicControls.letterboxSlider:SetMinMaxValues(0, 0.25); cinematicControls.letterboxSlider:SetValueStep(0.01); cinematicControls.letterboxSlider:SetObeyStepOnDrag(true)
     Backdrop(cinematicControls.letterboxSlider, C.card, C.border)
@@ -777,9 +791,11 @@ function ns:CreateOptions()
     local presence = CreateFrame("Frame", nil, panel, "BackdropTemplate")
     presence:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, -12); presence:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 58); presence:SetWidth(230)
     Backdrop(presence, C.card); panel.presence = presence; presence._rows = {}
-    presence.titleIcon = DrawInspectorIcon(presence, "transition"); presence.titleIcon:SetPoint("TOPLEFT", 10, -3)
-    local pTitle = Text(presence, "GameFontNormal", "Transition & relationships", C.accent); pTitle:SetPoint("TOPLEFT", presence.titleIcon, "TOPRIGHT", 3, -8)
-    panel.presenceContent = CreateFrame("Frame", nil, presence); panel.presenceContent:SetPoint("TOPLEFT", 12, -41); panel.presenceContent:SetPoint("BOTTOMRIGHT", -12, 10); panel.presenceContent._rows = {}
+    presence.titleIcon = DrawInspectorIcon(presence, "transition"); presence.titleIcon:SetSize(30, 30); presence.titleIcon:SetPoint("TOPLEFT", 10, -6)
+    local pTitle = Text(presence, "GameFontNormal", "Transition & relationships", C.accent)
+    pTitle:SetPoint("LEFT", presence.titleIcon, "RIGHT", 2, 0); pTitle:SetPoint("RIGHT", -10, 0)
+    pTitle:SetJustifyH("LEFT"); pTitle:SetWordWrap(false)
+    panel.presenceContent = CreateFrame("Frame", nil, presence); panel.presenceContent:SetPoint("TOPLEFT", 12, -42); panel.presenceContent:SetPoint("BOTTOMRIGHT", -12, 10); panel.presenceContent._rows = {}
 
     center:ClearAllPoints(); center:SetPoint("TOPLEFT", targets, "TOPRIGHT", 10, 0); center:SetPoint("BOTTOMRIGHT", presence, "BOTTOMLEFT", -10, 0)
 
@@ -913,7 +929,7 @@ function ns:CreateCinematicKeyCapture()
     blocker:SetAllPoints(self.Options); blocker:SetFrameLevel(610); blocker:EnableMouse(true); blocker:RegisterForClicks("AnyUp")
     blocker:SetScript("OnClick", function() if ns.CinematicKeyCapture then ns.CinematicKeyCapture:Hide() end end)
     Backdrop(blocker, { 0, 0, 0, 0.48 }, { 0, 0, 0, 0 }); blocker:Hide()
-    local capture = CreateFrame("Frame", "PriorityFaderCinematicKey", self.Options, "BackdropTemplate")
+    local capture = CreateFrame("Frame", "FrameGambitCinematicKey", self.Options, "BackdropTemplate")
     capture:SetSize(330, 152); capture:SetFrameStrata("FULLSCREEN_DIALOG"); capture:SetFrameLevel(611); capture:EnableMouse(true); capture:EnableKeyboard(true)
     if capture.SetPropagateKeyboardInput then capture:SetPropagateKeyboardInput(false) end
     Backdrop(capture, C.panel, C.accent); capture:Hide(); capture.blocker = blocker; self.CinematicKeyCapture = capture
@@ -993,15 +1009,15 @@ function ns:RefreshCinematicEditorControls()
     local panel = self.Options
     if not panel or not panel.header or not panel.cinematicControls then return end
     local active = self:IsCinematicActive()
-    panel.header:SetHeight(active and 116 or 74)
+    panel.header:SetHeight(active and 122 or 74)
     panel.cinematicControls:SetShown(active)
+    if panel.version then
+        panel.version:ClearAllPoints()
+        panel.version:SetPoint("BOTTOMRIGHT", panel.header, "BOTTOMRIGHT", -10, active and 49 or 9)
+    end
     if not active then return end
 
     local controls = panel.cinematicControls
-    controls.toggle:GetFontString():SetText("Turn off")
-    controls.toggle._selected, controls.toggle._selectedColor = true, CINEMATIC_BUTTON
-    controls.toggle:SetBackdropColor(unpack(CINEMATIC_BUTTON)); controls.toggle:SetBackdropBorderColor(unpack(CINEMATIC_ACCENT))
-    controls.toggle:GetFontString():SetTextColor(unpack(CINEMATIC_ACCENT))
     controls.shortcut:GetFontString():SetText("Shortcut: " .. CinematicBindingText())
     local enabled, height = self:GetCinematicLetterboxSettings()
     controls.letterboxApplying = true
@@ -1022,7 +1038,7 @@ function ns:CreateCinematicModePicker()
     blocker:SetAllPoints(self.Options); blocker:SetFrameLevel(606); blocker:EnableMouse(true); blocker:RegisterForClicks("AnyUp")
     blocker:SetScript("OnClick", function() if ns.CinematicModePicker then ns.CinematicModePicker:Hide() end end)
     Backdrop(blocker, { 0, 0, 0, 0.38 }, { 0, 0, 0, 0 }); blocker:Hide()
-    local picker = CreateFrame("Frame", "PriorityFaderCinematicModes", self.Options, "BackdropTemplate")
+    local picker = CreateFrame("Frame", "FrameGambitCinematicModes", self.Options, "BackdropTemplate")
     picker:SetSize(300, 250); picker:SetFrameStrata("FULLSCREEN_DIALOG"); picker:SetFrameLevel(607); picker:EnableMouse(true)
     Backdrop(picker, C.panel, C.accent); picker:Hide(); picker.blocker = blocker; picker.buttons = {}; self.CinematicModePicker = picker
     table.insert(UISpecialFrames, picker:GetName())
@@ -1066,7 +1082,7 @@ end
 
 function ns:CreateCinematicOptions()
     if self.CinematicOptions then return end
-    local page = CreateFrame("Frame", "PriorityFaderCinematicOptions", self.Options, "BackdropTemplate")
+    local page = CreateFrame("Frame", "FrameGambitCinematicOptions", self.Options, "BackdropTemplate")
     page:SetPoint("TOPLEFT", self.Options, "TOPLEFT", 12, -86); page:SetPoint("BOTTOMRIGHT", self.Options, "BOTTOMRIGHT", -12, 48)
     Backdrop(page, C.card); page:Hide(); self.CinematicOptions = page
     page.title = Text(page, "GameFontNormalLarge", "Cinematic Mode", C.accent); page.title:SetPoint("TOPLEFT", 16, -14)
@@ -1329,7 +1345,7 @@ end
 
 function ns:CreatePreview()
     if self.Preview then return end
-    local preview = CreateFrame("Frame", "PriorityFaderPreview", UIParent)
+    local preview = CreateFrame("Frame", "FrameGambitPreview", UIParent)
     preview:SetAllPoints(UIParent); preview:SetFrameStrata("FULLSCREEN_DIALOG"); preview:SetFrameLevel(880)
     preview:EnableMouse(false); preview:Hide(); preview.outlines, preview.token = {}, 0
     self.Preview = preview
@@ -1411,17 +1427,19 @@ function ns:CreateProfilePicker()
     blocker:SetAllPoints(self.Options); blocker:SetFrameLevel(590); blocker:EnableMouse(true); blocker:RegisterForClicks("AnyUp")
     blocker:SetScript("OnClick", function() if ns.ProfilePicker then ns.ProfilePicker:Hide() end end)
     Backdrop(blocker, { 0, 0, 0, 0.30 }, { 0, 0, 0, 0 }); blocker:Hide()
-    local picker = CreateFrame("Frame", "PriorityFaderProfiles", self.Options, "BackdropTemplate")
+    local picker = CreateFrame("Frame", "FrameGambitProfiles", self.Options, "BackdropTemplate")
     picker:SetSize(382, 356); picker:SetFrameStrata("FULLSCREEN_DIALOG"); picker:SetFrameLevel(591); picker:EnableMouse(true)
     Backdrop(picker, C.panel, C.accent); picker:Hide(); picker.blocker = blocker; self.ProfilePicker = picker
     table.insert(UISpecialFrames, picker:GetName())
     picker.title = Text(picker, "GameFontNormal", "Profiles", C.accent); picker.title:SetPoint("TOPLEFT", 14, -13)
-    picker.copy = Text(picker, "GameFontHighlightSmall", "Switch instantly, or create a copy of the active setup.", C.muted); picker.copy:SetPoint("TOPLEFT", picker.title, "BOTTOMLEFT", 0, -3)
+    picker.copy = Text(picker, "GameFontHighlightSmall", "Switch instantly, or create a copy of the active setup.", C.muted)
+    picker.copy:SetPoint("TOPLEFT", 14, -39); picker.copy:SetPoint("TOPRIGHT", -14, -39)
+    picker.copy:SetJustifyH("LEFT"); picker.copy:SetWordWrap(false)
     picker.export = Button(picker, "Export", 58, function() ns:OpenProfileTransfer("export") end); picker.export:SetPoint("TOPRIGHT", -43, -11)
     picker.import = Button(picker, "Import", 58, function() ns:OpenProfileTransfer("import") end); picker.import:SetPoint("RIGHT", picker.export, "LEFT", -5, 0)
     local close = CloseButton(picker); close:SetPoint("TOPRIGHT", -9, -9)
     local scroll = CreateFrame("ScrollFrame", nil, picker, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 14, -61); scroll:SetPoint("BOTTOMRIGHT", -29, 68); picker.scroll = scroll
+    scroll:SetPoint("TOPLEFT", 14, -63); scroll:SetPoint("BOTTOMRIGHT", -29, 68); picker.scroll = scroll
     local content = CreateFrame("Frame", nil, scroll); content:SetSize(326, 1); scroll:SetScrollChild(content); content._rows = {}; picker.content = content
     scroll:EnableMouseWheel(true)
     scroll:SetScript("OnMouseWheel", function(self, delta)
@@ -1452,86 +1470,129 @@ function ns:CreateProfileTransfer()
     blocker:SetAllPoints(self.Options); blocker:SetFrameLevel(594); blocker:EnableMouse(true); blocker:RegisterForClicks("AnyUp")
     blocker:SetScript("OnClick", function() if ns.ProfileTransfer then ns.ProfileTransfer:Hide() end end)
     Backdrop(blocker, { 0, 0, 0, 0.46 }, { 0, 0, 0, 0 }); blocker:Hide()
-    local transfer = CreateFrame("Frame", "PriorityFaderProfileTransfer", self.Options, "BackdropTemplate")
-    transfer:SetSize(470, 378); transfer:SetFrameStrata("FULLSCREEN_DIALOG"); transfer:SetFrameLevel(595); transfer:EnableMouse(true)
+    local transfer = CreateFrame("Frame", "FrameGambitProfileTransfer", self.Options, "BackdropTemplate")
+    transfer:SetSize(520, 420); transfer:SetFrameStrata("FULLSCREEN_DIALOG"); transfer:SetFrameLevel(595); transfer:EnableMouse(true)
     Backdrop(transfer, C.panel, C.accent); transfer:Hide(); transfer.blocker = blocker; self.ProfileTransfer = transfer
     table.insert(UISpecialFrames, transfer:GetName())
     transfer.title = Text(transfer, "GameFontNormal", "", C.accent); transfer.title:SetPoint("TOPLEFT", 14, -13)
-    transfer.copy = Text(transfer, "GameFontHighlightSmall", "", C.muted); transfer.copy:SetPoint("TOPLEFT", transfer.title, "BOTTOMLEFT", 0, -3)
+    transfer.copy = Text(transfer, "GameFontHighlightSmall", "", C.muted); transfer.copy:SetPoint("TOPLEFT", transfer.title, "BOTTOMLEFT", 0, -3); transfer.copy:SetPoint("RIGHT", -48, 0)
+    transfer.copy:SetJustifyH("LEFT"); transfer.copy:SetWordWrap(false)
     local close = CloseButton(transfer); close:SetPoint("TOPRIGHT", -9, -9)
-    local scroll = CreateFrame("ScrollFrame", nil, transfer, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 14, -62); scroll:SetPoint("BOTTOMRIGHT", -29, 92); transfer.scroll = scroll
-    transfer.text = CreateFrame("EditBox", nil, scroll, "BackdropTemplate")
-    transfer.text:SetMultiLine(true); transfer.text:SetAutoFocus(false); transfer.text:SetFontObject(ChatFontNormal)
-    transfer.text:SetTextColor(unpack(C.accent)); TrackTheme(transfer.text, "text"); transfer.text:SetTextInsets(8, 8, 7, 7); transfer.text:SetWidth(410); transfer.text:SetHeight(154); transfer.text:SetMaxLetters(60000)
-    Backdrop(transfer.text, C.cardAlt, C.border); scroll:SetScrollChild(transfer.text)
-    SkinScrollFrame(scroll)
-    transfer.nameLabel = Text(transfer, "GameFontHighlightSmall", "New profile name", C.teal); transfer.nameLabel:SetPoint("BOTTOMLEFT", 14, 67)
+    local textPanel = CreateFrame("Frame", nil, transfer, "BackdropTemplate")
+    textPanel:SetPoint("TOPLEFT", 14, -60); textPanel:SetPoint("BOTTOMRIGHT", -14, 112)
+    Backdrop(textPanel, C.cardAlt, C.border); transfer.textPanel = textPanel
+    local textBox = CreateFrame("Frame", nil, textPanel, "ScrollingEditBoxTemplate")
+    textBox:SetPoint("TOPLEFT", 7, -7); textBox:SetPoint("BOTTOMRIGHT", -7, 7)
+    transfer.textBox = textBox
+    transfer.text = textBox:GetEditBox()
+    transfer.text:SetAutoFocus(false); transfer.text:SetFontObject(ChatFontNormal); transfer.text:SetMaxLetters(60000)
+    transfer.text:SetTextColor(unpack(C.accent)); TrackTheme(transfer.text, "text")
+    transfer.nameLabel = Text(transfer, "GameFontHighlightSmall", "New profile name", C.teal); transfer.nameLabel:SetPoint("BOTTOMLEFT", 14, 76)
     transfer.name = CreateFrame("EditBox", nil, transfer, "BackdropTemplate")
-    transfer.name:SetSize(224, 22); transfer.name:SetPoint("BOTTOMLEFT", 14, 40); transfer.name:SetAutoFocus(false); transfer.name:SetFontObject(GameFontHighlightSmall)
+    transfer.name:SetSize(270, 24); transfer.name:SetPoint("BOTTOMLEFT", 14, 47); transfer.name:SetAutoFocus(false); transfer.name:SetFontObject(GameFontHighlightSmall)
     transfer.name:SetTextInsets(8, 8, 0, 0); transfer.name:SetTextColor(unpack(C.accent)); TrackTheme(transfer.name, "text"); Backdrop(transfer.name, C.cardAlt, C.border)
-    transfer.status = Text(transfer, "GameFontHighlightSmall", "", C.muted); transfer.status:SetPoint("BOTTOMLEFT", 14, 12); transfer.status:SetPoint("RIGHT", -14, 12); transfer.status:SetJustifyH("LEFT")
-    transfer.action = Button(transfer, "", 108, nil, true); transfer.action:SetPoint("BOTTOMRIGHT", -14, 40)
-    transfer.import = Button(transfer, "Import", 78, nil, true); transfer.import:SetPoint("RIGHT", transfer.action, "LEFT", -7, 0); transfer.import:Hide()
+    transfer.status = Text(transfer, "GameFontHighlightSmall", "", C.muted); transfer.status:SetPoint("BOTTOMLEFT", 14, 17); transfer.status:SetPoint("RIGHT", -14, 17); transfer.status:SetJustifyH("LEFT"); transfer.status:SetWordWrap(false)
+    transfer.action = Button(transfer, "", 150, nil, true); transfer.action:SetPoint("BOTTOMRIGHT", -14, 47)
+    transfer.action:SetFrameLevel(transfer:GetFrameLevel() + 30); transfer.action:EnableMouse(true); transfer.action:RegisterForClicks("AnyUp")
+
+    local function SetStatus(message, color)
+        transfer.status:SetText(message or "")
+        transfer.status:SetTextColor(unpack(color or C.muted))
+    end
+    transfer.SetStatus = SetStatus
+
+    local validationToken = 0
     transfer.text:SetScript("OnTextChanged", function(self)
-        local lines = self.GetNumLines and self:GetNumLines() or 11
-        self:SetHeight(math.max(154, math.min(24000, lines * 14 + 16)))
-        if transfer.mode == "import" then
-            transfer.validated = nil; transfer.import:Hide()
-            transfer.status:SetText("Paste an export, then validate it."); transfer.status:SetTextColor(unpack(C.muted))
-        end
+        if transfer.mode ~= "import" then return end
+        validationToken = validationToken + 1
+        local token = validationToken
+        local value = self:GetText() or ""
+        if value == "" then SetStatus("Paste a Frame Gambit export.", C.muted); return end
+        local called, profile, summary = pcall(ns.ParseProfileImport, ns, value)
+        if not called then SetStatus("Validation error: " .. tostring(profile), C.amber)
+        elseif profile then
+            local note = summary.clipboardAdjusted and " Clipboard repaired." or ""
+            local skippedCount = summary.skippedTargets or 0
+            local skipped = skippedCount > 0 and (" " .. skippedCount .. " unavailable target" .. (skippedCount == 1 and "" or "s") .. " skipped.") or ""
+            SetStatus("Ready: " .. summary.targets .. " targets, " .. summary.reactions .. " reactions." .. skipped .. note, C.teal)
+        else SetStatus(summary, C.amber) end
+        C_Timer.After(0, function()
+            if token ~= validationToken or not transfer:IsShown() then return end
+            self:SetCursorPosition(0)
+            local scrollBox = transfer.textBox and transfer.textBox:GetScrollBox()
+            if scrollBox and scrollBox.ScrollToBegin then scrollBox:ScrollToBegin() end
+        end)
     end)
+    transfer.text:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     transfer.name:SetScript("OnEnterPressed", function()
-        if transfer.import:IsShown() then transfer.import:Click() else transfer.action:Click() end
+        transfer.action:Click()
     end)
+    transfer.name:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     transfer:SetScript("OnHide", function()
-        transfer.blocker:Hide(); transfer.mode, transfer.validated = nil, nil
+        local reopenPicker, resultMessage = transfer.returnToPicker, transfer.resultMessage
+        transfer.blocker:Hide(); transfer.mode, transfer.returnToPicker, transfer.resultMessage = nil, nil, nil
         transfer.text:ClearFocus(); transfer.name:ClearFocus(); transfer.text:SetText(""); transfer.name:SetText("")
+        if reopenPicker and ns.Options and ns.Options:IsShown() then
+            C_Timer.After(0, function()
+                if not ns.Options or not ns.Options:IsShown() then return end
+                ns:OpenProfilePicker()
+                if resultMessage and ns.ProfilePicker then
+                    ns.ProfilePicker.status:SetText(resultMessage)
+                    ns.ProfilePicker.status:SetTextColor(unpack(C.teal))
+                end
+            end)
+        end
     end)
 end
 
 function ns:OpenProfileTransfer(mode)
     self:CreateProfileTransfer()
     local transfer = self.ProfileTransfer
-    transfer.mode, transfer.validated = mode, nil
+    transfer.returnToPicker = self.ProfilePicker and self.ProfilePicker:IsShown() or false
+    if transfer.returnToPicker then self.ProfilePicker:Hide() end
+    transfer.mode, transfer.resultMessage = mode, nil
     transfer.name:ClearFocus(); transfer.text:ClearFocus(); transfer.text:SetText(""); transfer.name:SetText("")
-    transfer.import:Hide(); transfer.nameLabel:Hide(); transfer.name:Hide()
-    transfer.scroll:SetVerticalScroll(0); transfer.action:Show()
+    transfer.nameLabel:Hide(); transfer.name:Hide()
+    transfer.action:Show()
     transfer:ClearAllPoints(); transfer:SetPoint("CENTER", self.Options, "CENTER", 0, 0)
     transfer.blocker:Show(); transfer:Show()
     if mode == "export" then
-        transfer.title:SetText("Export " .. ShortText(PriorityFaderDB.profile, 24))
+        transfer.title:SetText("Export " .. ShortText(FrameGambitDB.profile, 24))
         transfer.copy:SetText("Copy this text and keep it somewhere safe. It contains this profile only.")
         transfer.action:GetFontString():SetText("Select all")
         transfer.action:SetScript("OnClick", function() transfer.text:SetFocus(); transfer.text:HighlightText() end)
         local text, reason = self:ExportProfile()
         if not text then
-            transfer.status:SetText(reason); transfer.status:SetTextColor(unpack(C.amber)); transfer.action:Hide()
+            transfer.SetStatus(reason, C.amber); transfer.action:Hide()
             return
         end
         transfer.text:SetText(text); transfer.text:SetFocus(); transfer.text:HighlightText()
-        transfer.status:SetText("Press Ctrl+C to copy the selected export."); transfer.status:SetTextColor(unpack(C.teal))
+        transfer.SetStatus("Press Ctrl+C to copy the selected export.", C.teal)
     else
         transfer.title:SetText("Import profile")
-        transfer.copy:SetText("Paste an export, validate it, then import it as a new profile.")
+        transfer.copy:SetText("Paste an export, choose a new profile name, then import it.")
         transfer.nameLabel:Show(); transfer.name:Show()
-        transfer.status:SetText("Paste an export, then validate it."); transfer.status:SetTextColor(unpack(C.muted))
-        transfer.action:GetFontString():SetText("Validate")
+        local used = {}
+        for _, profileName in ipairs(self:GetProfileNames()) do used[profileName:lower()] = true end
+        local suggested, suffix = "Imported profile", 2
+        while used[suggested:lower()] do suggested, suffix = "Imported profile " .. suffix, suffix + 1 end
+        transfer.name:SetText(suggested); transfer.name:HighlightText()
+        transfer.SetStatus("Paste a Frame Gambit export.", C.muted)
+        transfer.action:GetFontString():SetText("Import profile")
         transfer.action:SetScript("OnClick", function()
-            local profile, summary = ns:ParseProfileImport(transfer.text:GetText())
-            if not profile then transfer.status:SetText(summary); transfer.status:SetTextColor(unpack(C.amber)); return end
-            transfer.validated = true; transfer.import:Show()
-            transfer.status:SetText("Ready: " .. summary.targets .. " targets, " .. summary.reactions .. " reactions.")
-            transfer.status:SetTextColor(unpack(C.teal))
-        end)
-        transfer.import:SetScript("OnClick", function()
-            if not transfer.validated then return end
-            local ok, result = ns:ImportProfile(transfer.name:GetText(), transfer.text:GetText())
+            local importedName = transfer.name:GetText()
+            local called, ok, result = pcall(ns.ImportProfile, ns, importedName, transfer.text:GetText())
+            if not called then
+                transfer.SetStatus("Import error: " .. tostring(ok), C.amber)
+                return
+            end
             if ok then
+                local skippedCount = result.skippedTargets or 0
+                local skipped = skippedCount > 0 and ("; skipped " .. skippedCount .. " unavailable target" .. (skippedCount == 1 and "" or "s")) or ""
+                transfer.resultMessage = "Imported " .. importedName .. " (" .. result.targets .. " targets, " .. result.reactions .. " reactions" .. skipped .. "). Select it to use it."
                 transfer:Hide()
-                if ns.ProfilePicker and ns.ProfilePicker:IsShown() then ns.ProfilePicker:Hide() end
             else
-                transfer.status:SetText(result); transfer.status:SetTextColor(unpack(C.amber))
+                transfer.SetStatus(result, C.amber)
             end
         end)
         transfer.text:SetFocus()
@@ -1544,7 +1605,7 @@ function ns:CreateProfileDeleteConfirm()
     blocker:SetAllPoints(self.Options); blocker:SetFrameLevel(592); blocker:EnableMouse(true); blocker:RegisterForClicks("AnyUp")
     blocker:SetScript("OnClick", function() if ns.ProfileDeleteConfirm then ns.ProfileDeleteConfirm:Hide() end end)
     Backdrop(blocker, { 0, 0, 0, 0.42 }, { 0, 0, 0, 0 }); blocker:Hide()
-    local confirm = CreateFrame("Frame", "PriorityFaderProfileDelete", self.Options, "BackdropTemplate")
+    local confirm = CreateFrame("Frame", "FrameGambitProfileDelete", self.Options, "BackdropTemplate")
     confirm:SetSize(326, 138); confirm:SetFrameStrata("FULLSCREEN_DIALOG"); confirm:SetFrameLevel(593); confirm:EnableMouse(true)
     Backdrop(confirm, C.panel, C.amber); confirm:Hide(); confirm.blocker = blocker; self.ProfileDeleteConfirm = confirm
     table.insert(UISpecialFrames, confirm:GetName())
@@ -1578,7 +1639,7 @@ function ns:RenderProfilePicker()
     if not picker or not picker:IsShown() then return end
     ClearChildren(picker.content)
     picker.content._profileRows = picker.content._profileRows or {}
-    local active = PriorityFaderDB.profile
+    local active = FrameGambitDB.profile
     local y = 0
     for index, name in ipairs(self:GetProfileNames()) do
         local profileName = name
@@ -1619,7 +1680,7 @@ function ns:OpenProfilePicker()
     if self:IsCinematicActive() then
         picker.status:SetText("Choose a normal profile to leave Cinematic editing and return to your UI.")
     else
-        picker.status:SetText("New profiles start as a copy of " .. (PriorityFaderDB.profile or "Default") .. ".")
+        picker.status:SetText("New profiles start as a copy of " .. (FrameGambitDB.profile or "Default") .. ".")
     end
     picker.status:SetTextColor(unpack(C.muted))
     picker:ClearAllPoints(); picker:SetPoint("CENTER", self.Options, "CENTER", 0, 0)
@@ -1665,7 +1726,7 @@ function ns:CreateReactionPalette()
     local blocker = CreateFrame("Button", nil, self.Options, "BackdropTemplate")
     blocker:SetAllPoints(self.Options); blocker:SetFrameLevel(578); blocker:EnableMouse(true); blocker:RegisterForClicks("AnyUp")
     blocker:SetScript("OnClick", function() end); Backdrop(blocker, { 0, 0, 0, 0.32 }, { 0, 0, 0, 0 }); blocker:Hide()
-    local palette = CreateFrame("Frame", "PriorityFaderReactionPalette", self.Options, "BackdropTemplate")
+    local palette = CreateFrame("Frame", "FrameGambitReactionPalette", self.Options, "BackdropTemplate")
     -- Seven categories occupy three navigation rows. Keep that rail visibly
     -- separate from the selectable requirement cards below it.
     palette:SetSize(386, 380); palette:SetFrameStrata("FULLSCREEN_DIALOG"); palette:SetFrameLevel(580)
@@ -1788,7 +1849,7 @@ function ns:CreateFormPicker()
     local blocker = CreateFrame("Button", nil, self.Options, "BackdropTemplate")
     blocker:SetAllPoints(self.Options); blocker:SetFrameLevel(588); blocker:EnableMouse(true); blocker:RegisterForClicks("AnyUp")
     blocker:SetScript("OnClick", function() end); Backdrop(blocker, { 0, 0, 0, 0.32 }, { 0, 0, 0, 0 }); blocker:Hide()
-    local picker = CreateFrame("Frame", "PriorityFaderFormPicker", self.Options, "BackdropTemplate")
+    local picker = CreateFrame("Frame", "FrameGambitFormPicker", self.Options, "BackdropTemplate")
     picker:SetSize(430, 260); picker:SetFrameStrata("FULLSCREEN_DIALOG"); picker:SetFrameLevel(590)
     picker:EnableMouse(true); Backdrop(picker, C.panel, C.accent); picker:Hide(); picker.blocker = blocker; self.FormPicker = picker
     table.insert(UISpecialFrames, picker:GetName())
@@ -1842,7 +1903,7 @@ function ns:CreateSpecPicker()
     local blocker = CreateFrame("Button", nil, self.Options, "BackdropTemplate")
     blocker:SetAllPoints(self.Options); blocker:SetFrameLevel(588); blocker:EnableMouse(true); blocker:RegisterForClicks("AnyUp")
     blocker:SetScript("OnClick", function() end); Backdrop(blocker, { 0, 0, 0, 0.32 }, { 0, 0, 0, 0 }); blocker:Hide()
-    local picker = CreateFrame("Frame", "PriorityFaderSpecPicker", self.Options, "BackdropTemplate")
+    local picker = CreateFrame("Frame", "FrameGambitSpecPicker", self.Options, "BackdropTemplate")
     picker:SetSize(430, 278); picker:SetFrameStrata("FULLSCREEN_DIALOG"); picker:SetFrameLevel(590)
     picker:EnableMouse(true); Backdrop(picker, C.panel, C.accent); picker:Hide(); picker.blocker = blocker; self.SpecPicker = picker
     table.insert(UISpecialFrames, picker:GetName())
@@ -2012,7 +2073,7 @@ function ns:CreateConnectionPicker()
     blocker:SetAllPoints(self.Options); blocker:SetFrameLevel(579); blocker:EnableMouse(true); blocker:RegisterForClicks("AnyUp")
     blocker:SetScript("OnClick", function() end)
     Backdrop(blocker, { 0, 0, 0, 0.42 }, { 0, 0, 0, 0 }); blocker:Hide()
-    local picker = CreateFrame("Frame", "PriorityFaderConnections", self.Options, "BackdropTemplate")
+    local picker = CreateFrame("Frame", "FrameGambitConnections", self.Options, "BackdropTemplate")
     picker:SetSize(430, 410); picker:SetFrameStrata("FULLSCREEN_DIALOG"); picker:SetFrameLevel(581)
     picker:EnableMouse(true); Backdrop(picker, C.panel, C.accent); picker:Hide(); picker.blocker = blocker; self.ConnectionPicker = picker
     table.insert(UISpecialFrames, picker:GetName())
@@ -2153,7 +2214,7 @@ function ns:CreateOpacityPicker()
     blocker:SetAllPoints(self.Options); blocker:SetFrameLevel(582); blocker:EnableMouse(true); blocker:RegisterForClicks("AnyUp")
     blocker:SetScript("OnClick", function() if ns.OpacityPicker then ns.OpacityPicker:Hide() end end)
     Backdrop(blocker, { 0, 0, 0, 0.22 }, { 0, 0, 0, 0 }); blocker:Hide()
-    local picker = CreateFrame("Frame", "PriorityFaderOpacity", self.Options, "BackdropTemplate")
+    local picker = CreateFrame("Frame", "FrameGambitOpacity", self.Options, "BackdropTemplate")
     picker:SetSize(294, 148); picker:SetFrameStrata("FULLSCREEN_DIALOG"); picker:SetFrameLevel(583); picker:EnableMouse(true)
     Backdrop(picker, C.panel, C.accent); picker:Hide(); picker.blocker = blocker; self.OpacityPicker = picker
     table.insert(UISpecialFrames, picker:GetName())
@@ -2210,7 +2271,7 @@ function ns:CreateDurationPicker()
     blocker:SetAllPoints(self.Options); blocker:SetFrameLevel(584); blocker:EnableMouse(true); blocker:RegisterForClicks("AnyUp")
     blocker:SetScript("OnClick", function() if ns.DurationPicker then ns.DurationPicker:Hide() end end)
     Backdrop(blocker, { 0, 0, 0, 0.22 }, { 0, 0, 0, 0 }); blocker:Hide()
-    local picker = CreateFrame("Frame", "PriorityFaderDuration", self.Options, "BackdropTemplate")
+    local picker = CreateFrame("Frame", "FrameGambitDuration", self.Options, "BackdropTemplate")
     picker:SetSize(294, 148); picker:SetFrameStrata("FULLSCREEN_DIALOG"); picker:SetFrameLevel(585); picker:EnableMouse(true)
     Backdrop(picker, C.panel, C.accent); picker:Hide(); picker.blocker = blocker; self.DurationPicker = picker
     table.insert(UISpecialFrames, picker:GetName())
@@ -2267,7 +2328,7 @@ function ns:CreateTimingPicker()
     blocker:SetAllPoints(self.Options); blocker:SetFrameLevel(586); blocker:EnableMouse(true); blocker:RegisterForClicks("AnyUp")
     blocker:SetScript("OnClick", function() if ns.TimingPicker then ns.TimingPicker:Hide() end end)
     Backdrop(blocker, { 0, 0, 0, 0.22 }, { 0, 0, 0, 0 }); blocker:Hide()
-    local picker = CreateFrame("Frame", "PriorityFaderTiming", self.Options, "BackdropTemplate")
+    local picker = CreateFrame("Frame", "FrameGambitTiming", self.Options, "BackdropTemplate")
     picker:SetSize(318, 204); picker:SetFrameStrata("FULLSCREEN_DIALOG"); picker:SetFrameLevel(587); picker:EnableMouse(true)
     Backdrop(picker, C.panel, C.accent); picker:Hide(); picker.blocker = blocker; self.TimingPicker = picker
     table.insert(UISpecialFrames, picker:GetName())
@@ -2480,20 +2541,22 @@ function ns:RenderOptions()
     self:RefreshCinematicEditorControls()
     if panel.profile then
         local cinematicActive = self:IsCinematicActive()
-        panel.profile.label:SetText(cinematicActive and "Editing: Cinematic" or ("Profile: " .. ShortText(PriorityFaderDB.profile or "Default", 16)))
+        panel.profile.label:SetText(cinematicActive and "Editing: Cinematic" or ("Profile: " .. ShortText(FrameGambitDB.profile or "Default", 16)))
         panel.profile:ClearAllPoints(); panel.profile:SetPoint("TOPRIGHT", panel.cinematic, "TOPLEFT", -8, 0)
         panel.profile.arrow:Show()
         panel.profile.label:ClearAllPoints(); panel.profile.label:SetPoint("LEFT", 8, 0)
-        if cinematicActive then panel.profile.label:SetPoint("RIGHT", -8, 0) else panel.profile.label:SetPoint("RIGHT", panel.profile.arrow, "LEFT", -2, 0) end
+        panel.profile.label:SetPoint("RIGHT", panel.profile.arrow, "LEFT", -2, 0)
         panel.profile.label:SetJustifyH("CENTER")
         panel.profile:SetBackdropBorderColor(unpack(cinematicActive and CINEMATIC_ACCENT or C.border))
         panel.profile.label:SetTextColor(unpack(cinematicActive and CINEMATIC_ACCENT or C.accent))
         panel.profile:EnableMouse(true)
         panel.cinematic:SetShown(true)
-        -- The inline Turn off action owns scene exit. The filled header button
-        -- is a status marker during editing, avoiding two controls that do the
-        -- same thing.
-        panel.cinematic:EnableMouse(not cinematicActive)
+        panel.cinematic:EnableMouse(true)
+        panel.cinematic:GetFontString():SetText(cinematicActive and "Exit cinematic edit" or "Cinematic mode edit")
+        panel.cinematic._tooltipTitle = cinematicActive and "Exit Cinematic editing" or "Edit Cinematic Mode"
+        panel.cinematic._tooltipBody = cinematicActive
+            and "Return to the profile you were using before Cinematic Mode. You can also choose a normal profile from the profile menu."
+            or "Enter the dedicated Cinematic profile in this familiar editor."
     end
     if not panel.selected or not self.TargetByID[panel.selected] then
         panel.selected = nil
@@ -2961,7 +3024,7 @@ end
 
 function ns:CreatePicker()
     if self.Picker then return end
-    local picker = CreateFrame("Button", "PriorityFaderPicker", UIParent)
+    local picker = CreateFrame("Button", "FrameGambitPicker", UIParent)
     picker:SetAllPoints(UIParent); picker:SetFrameStrata("FULLSCREEN_DIALOG"); picker:SetFrameLevel(900)
     picker:EnableMouse(true); picker:EnableMouseWheel(true); picker:RegisterForClicks("LeftButtonUp")
     picker:SetNormalTexture("Interface\\Buttons\\WHITE8X8"); picker:GetNormalTexture():SetAlpha(0)

@@ -144,7 +144,7 @@ local function ResolveFrames()
     return visual, owner
 end
 
-function proxy:GetPriorityFaderVisualFrame()
+function proxy:GetFrameGambitVisualFrame()
     ResolveFrames()
     return visual
 end

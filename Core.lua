@@ -1,9 +1,11 @@
 local ADDON, ns = ...
 
 ns.NAME = "Frame Gambit"
-ns.VERSION = "2.10.0"
-BINDING_HEADER_PRIORITYFADER = "Frame Gambit"
-BINDING_NAME_PRIORITYFADER_TOGGLE_CINEMATIC = "Toggle Frame Gambit Cinematic Mode"
+ns.VERSION = "2.11.0"
+BINDING_HEADER_FRAMEGAMBIT = "Frame Gambit"
+BINDING_NAME_FRAMEGAMBIT_TOGGLE_CINEMATIC = "Toggle Frame Gambit Cinematic Mode"
+local CINEMATIC_BINDING = "FRAMEGAMBIT_TOGGLE_CINEMATIC"
+local LEGACY_CINEMATIC_BINDING = "PRIORITYFADER_TOGGLE_CINEMATIC"
 ns.MAX_REACTIONS_PER_TARGET = 32
 ns.COLORS = {
     panel = { 0.035, 0.04, 0.065, 0.98 },
@@ -348,8 +350,39 @@ local function DeepCopy(value, seen)
     return copy
 end
 
+-- Frame Gambit is the primary saved-variable name. The legacy variable is
+-- intentionally declared in the TOC for this transition, allowing an update
+-- to adopt existing Priority Fader profiles after the old addon folder has
+-- been removed. Both globals point to the same table for the rest of this
+-- session, so the migration never needs to guess how to merge two profiles.
+function ns:AdoptLegacySettings(legacyOverride, force)
+    local legacy = type(legacyOverride) == "table" and legacyOverride
+        or (type(PriorityFaderDB) == "table" and PriorityFaderDB or nil)
+    local function HasStoredConfiguration(db)
+        return type(db) == "table" and (type(db.profiles) == "table" and next(db.profiles) ~= nil
+            or type(db.customTargets) == "table" and next(db.customTargets) ~= nil
+            or type(db.cinematic) == "table" and next(db.cinematic) ~= nil)
+    end
+    if legacy and (force or type(FrameGambitDB) ~= "table"
+        or (FrameGambitDB.renameMigration ~= true and HasStoredConfiguration(legacy) and not HasStoredConfiguration(FrameGambitDB))) then
+        FrameGambitDB = legacy
+    end
+    FrameGambitDB = type(FrameGambitDB) == "table" and FrameGambitDB or {}
+    FrameGambitDB.renameMigration = true
+    FrameGambitDB.renameMigrationVersion = 2
+    PriorityFaderDB = FrameGambitDB
+    return FrameGambitDB
+end
+
+-- Called by the one-release PriorityFader settings bridge. It must run before
+-- PLAYER_LOGIN, when the old package's SavedVariables file is still available.
+function FrameGambit_AdoptLegacySettings(legacy)
+    if type(FrameGambitDB) == "table" and FrameGambitDB.renameMigrationVersion == 2 then return true end
+    return ns:AdoptLegacySettings(legacy, true) ~= nil
+end
+
 function ns:Profile()
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     db.profiles = db.profiles or {}
     db.profile = db.profile or "Default"
     db.profiles[db.profile] = db.profiles[db.profile] or { targets = {}, groups = {}, links = {}, visibilityLinks = {}, nextReactionID = 1, nextGroupID = 1 }
@@ -378,7 +411,7 @@ function ns:NextGroupID()
 end
 
 function ns:MigrateDatabase()
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     local oldVersion = tonumber(db.version) or 1
     local aliases = { target = "target_any", hostile_target = "target_hostile", pvp = "pvp_flagged" }
     local function RemoveProfileTargets(profile, matches)
@@ -701,9 +734,9 @@ function ns:MigrateDatabase()
 end
 
 function ns:GetTutorialState()
-    PriorityFaderDB = type(PriorityFaderDB) == "table" and PriorityFaderDB or {}
-    PriorityFaderDB.tutorial = type(PriorityFaderDB.tutorial) == "table" and PriorityFaderDB.tutorial or {}
-    local state = PriorityFaderDB.tutorial
+    FrameGambitDB = type(FrameGambitDB) == "table" and FrameGambitDB or {}
+    FrameGambitDB.tutorial = type(FrameGambitDB.tutorial) == "table" and FrameGambitDB.tutorial or {}
+    local state = FrameGambitDB.tutorial
     state.completed = state.completed == true
     state.lastStep = math.max(1, math.min(9, math.floor(tonumber(state.lastStep) or 1)))
     return state.lastStep, state.completed
@@ -711,7 +744,7 @@ end
 
 function ns:SetTutorialState(step, completed)
     self:GetTutorialState()
-    local state = PriorityFaderDB.tutorial
+    local state = FrameGambitDB.tutorial
     if step ~= nil then state.lastStep = math.max(1, math.min(9, math.floor(tonumber(step) or 1))) end
     if completed ~= nil then state.completed = completed == true end
     return state
@@ -780,7 +813,7 @@ local function CinematicSettingsMatch(settings, mode, rest)
 end
 
 function ns:GetCinematicProfileName()
-    local cinematic = PriorityFaderDB and PriorityFaderDB.cinematic
+    local cinematic = FrameGambitDB and FrameGambitDB.cinematic
     return cinematic and cinematic.profileName
 end
 
@@ -789,7 +822,7 @@ function ns:IsCinematicProfileName(name)
 end
 
 function ns:EnsureCinematicProfile()
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     db.cinematic = type(db.cinematic) == "table" and db.cinematic or {}
     local cinematic = db.cinematic
     cinematic.actions = type(cinematic.actions) == "table" and cinematic.actions or {}
@@ -871,11 +904,11 @@ function ns:GetCinematicProfile()
 end
 
 function ns:IsCinematicActive()
-    return PriorityFaderDB and PriorityFaderDB.profile == self:GetCinematicProfileName()
+    return FrameGambitDB and FrameGambitDB.profile == self:GetCinematicProfileName()
 end
 
 function ns:InvalidateTargetTransition(id)
-    local profile = PriorityFaderDB and PriorityFaderDB.profiles and PriorityFaderDB.profiles[PriorityFaderDB.profile]
+    local profile = FrameGambitDB and FrameGambitDB.profiles and FrameGambitDB.profiles[FrameGambitDB.profile]
     local links = profile and profile.visibilityLinks or {}
     local function Clear(current, seen)
         if not current or seen[current] then return end
@@ -908,7 +941,7 @@ local CINEMATIC_LOCKED_NAMES = {
     SettingsPanel = true,
 }
 
-local CINEMATIC_UI_MODE = "PriorityFader.Cinematic"
+local CINEMATIC_UI_MODE = "FrameGambit.Cinematic"
 local CINEMATIC_UI_ROLES = {
     "actionBars",
     "arenaFrames",
@@ -1117,11 +1150,11 @@ function ns:RefreshCinematicExemptions()
         local frame = self:ResolveTarget(id)
         local visual = frame
         local okVisual, resolvedVisual = pcall(function()
-            return frame and type(frame.GetPriorityFaderVisualFrame) == "function" and frame:GetPriorityFaderVisualFrame() or nil
+            return frame and type(frame.GetFrameGambitVisualFrame) == "function" and frame:GetFrameGambitVisualFrame() or nil
         end)
         if okVisual and resolvedVisual then visual = resolvedVisual end
         local okFrames, providerFrames = pcall(function()
-            return frame and type(frame.GetPriorityFaderCinematicFrames) == "function" and frame:GetPriorityFaderCinematicFrames() or nil
+            return frame and type(frame.GetFrameGambitCinematicFrames) == "function" and frame:GetFrameGambitCinematicFrames() or nil
         end)
         if okFrames and type(providerFrames) == "table" then
             for _, providerFrame in pairs(providerFrames) do
@@ -1154,7 +1187,7 @@ function ns:RefreshCinematicExemptions()
             if root then frames[root] = true end
         end
     end
-    local keepNames = PriorityFaderDB and PriorityFaderDB.cinematic and PriorityFaderDB.cinematic.keepNames
+    local keepNames = FrameGambitDB and FrameGambitDB.cinematic and FrameGambitDB.cinematic.keepNames
     for name, keep in pairs(type(keepNames) == "table" and keepNames or {}) do
         local frame = keep == true and type(name) == "string" and _G[name] or nil
         local boundary = frame and self.GetEUIUnitFrameBoundary and self:GetEUIUnitFrameBoundary(frame)
@@ -1168,7 +1201,7 @@ function ns:RefreshCinematicExemptions()
 end
 
 function ns:IsCinematicBlackoutExempt(root)
-    if not root or root == UIParent or root == WorldFrame or self:IsPriorityFaderFrame(root) then return true end
+    if not root or root == UIParent or root == WorldFrame or self:IsFrameGambitFrame(root) then return true end
     local name = SafeFrameName(root)
     if name and CINEMATIC_LOCKED_NAMES[name] then return true end
     if IsCinematicNameplateFrame(root, name) then return true end
@@ -1179,7 +1212,7 @@ function ns:IsCinematicBlackoutExempt(root)
     if runtime.cinematicExemptFrames and runtime.cinematicExemptFrames[root] then return true end
     if runtime.cinematicOpenWindows and runtime.cinematicOpenWindows[root]
         and SafeFrameShown(root) then return true end
-    local keepNames = PriorityFaderDB and PriorityFaderDB.cinematic and PriorityFaderDB.cinematic.keepNames
+    local keepNames = FrameGambitDB and FrameGambitDB.cinematic and FrameGambitDB.cinematic.keepNames
     if name and type(keepNames) == "table" and keepNames[name] == true then return true end
     return runtime.cinematicKeepFrames and runtime.cinematicKeepFrames[root] == true or false
 end
@@ -1221,7 +1254,7 @@ end
 function ns:KeepCinematicFrame(frame)
     local visual = frame
     local okVisual, resolvedVisual = pcall(function()
-        return frame and type(frame.GetPriorityFaderVisualFrame) == "function" and frame:GetPriorityFaderVisualFrame() or nil
+        return frame and type(frame.GetFrameGambitVisualFrame) == "function" and frame:GetFrameGambitVisualFrame() or nil
     end)
     if okVisual and resolvedVisual then visual = resolvedVisual end
     local root = self:GetFramePickerRoot(visual)
@@ -1230,8 +1263,8 @@ function ns:KeepCinematicFrame(frame)
     local managed = owner or root
     local name = SafeFrameName(managed)
     if name then
-        PriorityFaderDB.cinematic.keepNames = type(PriorityFaderDB.cinematic.keepNames) == "table" and PriorityFaderDB.cinematic.keepNames or {}
-        PriorityFaderDB.cinematic.keepNames[name] = true
+        FrameGambitDB.cinematic.keepNames = type(FrameGambitDB.cinematic.keepNames) == "table" and FrameGambitDB.cinematic.keepNames or {}
+        FrameGambitDB.cinematic.keepNames[name] = true
     else
         runtime.cinematicKeepFrames = runtime.cinematicKeepFrames or setmetatable({}, { __mode = "k" })
         runtime.cinematicKeepFrames[visual] = true
@@ -1243,8 +1276,8 @@ function ns:KeepCinematicFrame(frame)
 end
 
 function ns:ClearCinematicKeeps()
-    if not PriorityFaderDB or not PriorityFaderDB.cinematic then return end
-    PriorityFaderDB.cinematic.keepNames = {}
+    if not FrameGambitDB or not FrameGambitDB.cinematic then return end
+    FrameGambitDB.cinematic.keepNames = {}
     runtime.cinematicKeepFrames = setmetatable({}, { __mode = "k" })
     self:RefreshCinematicExemptions()
     self:BeginCinematicBlackout()
@@ -1252,7 +1285,7 @@ end
 
 function ns:GetCinematicKeepCount()
     local count = 0
-    for _ in pairs(PriorityFaderDB and PriorityFaderDB.cinematic and PriorityFaderDB.cinematic.keepNames or {}) do count = count + 1 end
+    for _ in pairs(FrameGambitDB and FrameGambitDB.cinematic and FrameGambitDB.cinematic.keepNames or {}) do count = count + 1 end
     for _ in pairs(runtime.cinematicKeepFrames or {}) do count = count + 1 end
     return count
 end
@@ -1502,8 +1535,8 @@ function ns:ResetCinematicProfile()
         profile.targets[component.id] = NewCinematicSettings(profile, component.default, component.rest,
             component.id == "minimap" and "hide_zero" or nil)
     end
-    PriorityFaderDB.cinematic.letterboxEnabled = false
-    PriorityFaderDB.cinematic.letterboxHeight = 0.04
+    FrameGambitDB.cinematic.letterboxEnabled = false
+    FrameGambitDB.cinematic.letterboxHeight = 0.04
     if self.RefreshCinematicLetterbox then self:RefreshCinematicLetterbox() end
     if self:IsCinematicActive() then
         if self.PrimeCinematicTargets then self:PrimeCinematicTargets() end
@@ -1516,7 +1549,7 @@ end
 function ns:ToggleCinematic(keepOptionsOpen)
     if InCombatLockdown() then return false, "Toggle Cinematic Mode outside combat.", self:IsCinematicActive() end
     local cinematicName = self:EnsureCinematicProfile()
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     local restoreEditor = keepOptionsOpen == true and self.Options and self.Options:IsShown()
     if db.profile == cinematicName then
         local returnProfile = db.cinematic.returnProfile
@@ -1560,23 +1593,41 @@ function ns:ToggleCinematic(keepOptionsOpen)
 end
 
 function ns:GetCinematicBinding()
-    local primary = GetBindingKey and GetBindingKey("PRIORITYFADER_TOGGLE_CINEMATIC")
+    local primary = GetBindingKey and GetBindingKey(CINEMATIC_BINDING)
     return primary
+end
+
+function ns:MigrateLegacyCinematicBinding()
+    if InCombatLockdown() or not GetBindingKey or not SetBinding or not SaveBindings then return end
+    local newPrimary, newSecondary = GetBindingKey(CINEMATIC_BINDING)
+    if newPrimary or newSecondary then return end
+    local oldPrimary, oldSecondary = GetBindingKey(LEGACY_CINEMATIC_BINDING)
+    if not oldPrimary and not oldSecondary then return end
+    local migrated = {}
+    for _, key in ipairs({ oldPrimary, oldSecondary }) do
+        if key and SetBinding(key, CINEMATIC_BINDING) ~= false then migrated[#migrated + 1] = key end
+    end
+    if #migrated == 0 then return end
+    local bindingSet = (GetCurrentBindingSet and GetCurrentBindingSet()) or 1
+    if SaveBindings(bindingSet) == false then
+        for _, key in ipairs(migrated) do SetBinding(key, LEGACY_CINEMATIC_BINDING) end
+        SaveBindings(bindingSet)
+    end
 end
 
 function ns:SetCinematicBinding(key)
     if InCombatLockdown() then return false, "Change shortcuts outside combat." end
     if not SetBinding or not SaveBindings then return false, "WoW key binding controls are unavailable." end
-    local oldPrimary, oldSecondary = GetBindingKey("PRIORITYFADER_TOGGLE_CINEMATIC")
+    local oldPrimary, oldSecondary = GetBindingKey(CINEMATIC_BINDING)
     local replacedAction = key and GetBindingAction and GetBindingAction(key)
-    if key and SetBinding(key, "PRIORITYFADER_TOGGLE_CINEMATIC") == false then return false, "WoW rejected that shortcut." end
+    if key and SetBinding(key, CINEMATIC_BINDING) == false then return false, "WoW rejected that shortcut." end
     if oldPrimary and oldPrimary ~= key then SetBinding(oldPrimary, nil) end
     if oldSecondary and oldSecondary ~= key then SetBinding(oldSecondary, nil) end
     local bindingSet = (GetCurrentBindingSet and GetCurrentBindingSet()) or 1
     if SaveBindings(bindingSet) == false then
         if key then SetBinding(key, replacedAction and replacedAction ~= "" and replacedAction or nil) end
-        if oldPrimary then SetBinding(oldPrimary, "PRIORITYFADER_TOGGLE_CINEMATIC") end
-        if oldSecondary then SetBinding(oldSecondary, "PRIORITYFADER_TOGGLE_CINEMATIC") end
+        if oldPrimary then SetBinding(oldPrimary, CINEMATIC_BINDING) end
+        if oldSecondary then SetBinding(oldSecondary, CINEMATIC_BINDING) end
         SaveBindings(bindingSet)
         return false, "WoW could not save that shortcut; the previous binding was restored."
     end
@@ -1728,7 +1779,7 @@ function ns:RestoreControlledFrame(id)
 end
 
 function ns:GetProfileNames()
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     local names = {}
     for name in pairs(db.profiles or {}) do
         if type(name) == "string" and name ~= "" then names[#names + 1] = name end
@@ -1757,7 +1808,7 @@ end
 
 function ns:SelectProfile(name, preserveCinematicReturn)
     name = NormalizeProfileName(name)
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     if not name or not db.profiles or not db.profiles[name] then return false, "That profile does not exist." end
     if db.profile == name then return true end
     if self:IsCinematicActive() then
@@ -1794,7 +1845,7 @@ end
 function ns:CreateProfile(name)
     if self:IsCinematicActive() then return false, "Turn off Cinematic Mode before creating a normal profile." end
     name = NormalizeProfileName(name)
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     if not name then return false, "Use 1-24 letters, numbers, spaces, hyphens, underscores, or apostrophes." end
     if FindProfileName(db, name) then return false, "That profile name is already in use." end
     db.profiles[name] = DeepCopy(self:Profile())
@@ -1803,7 +1854,7 @@ end
 
 function ns:DeleteProfile(name)
     name = NormalizeProfileName(name)
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     if not name or not db.profiles[name] then return false, "That profile does not exist." end
     if name == "Default" then return false, "Default is kept as a safe fallback." end
     if self:IsCinematicProfileName(name) then return false, "Cinematic Mode is managed from its dedicated page." end
@@ -1843,7 +1894,16 @@ end
 
 local function SplitFields(line)
     local fields = {}
-    for field in (line .. "|"):gmatch("(.-)|") do fields[#fields + 1] = field end
+    local start = 1
+    while true do
+        local delimiter = line:find("|", start, true)
+        if not delimiter then
+            fields[#fields + 1] = line:sub(start)
+            break
+        end
+        fields[#fields + 1] = line:sub(start, delimiter - 1)
+        start = delimiter + 1
+    end
     return fields
 end
 
@@ -1868,9 +1928,9 @@ local function ImportFailure(message)
 end
 
 function ns:ExportProfile(name)
-    name = NormalizeProfileName(name or PriorityFaderDB.profile)
+    name = NormalizeProfileName(name or FrameGambitDB.profile)
     if self:IsCinematicProfileName(name) then return nil, "Turn off Cinematic Mode before exporting a normal profile." end
-    local profile = name and PriorityFaderDB.profiles and PriorityFaderDB.profiles[name]
+    local profile = name and FrameGambitDB.profiles and FrameGambitDB.profiles[name]
     if not profile then return nil, "That profile does not exist." end
     local lines = { "PF1" }
     for _, targetID in ipairs(SortedKeys(profile.targets)) do
@@ -1884,7 +1944,7 @@ function ns:ExportProfile(name)
             local fadeDelay = math.max(0, math.min(15, tonumber(settings.fadeDelay) or 0.80))
             lines[#lines + 1] = table.concat({ "T", EncodeField(targetID), enabled, atRest, fadeDuration, fadeDelay }, "|")
             -- Keep this as an optional, independent entry instead of changing
-            -- the T record's shape.  Existing Frame Gambit/PriorityFader
+            -- the T record's shape.  Existing Frame Gambit/FrameGambit
             -- imports continue to parse, and old exports simply mean "keep".
             -- It is deliberately limited to the native Minimap marker
             -- compositor; no arbitrary per-adapter settings cross profiles.
@@ -1945,7 +2005,7 @@ function ns:ExportProfile(name)
         end
     end
     local body = table.concat(lines, "\n")
-    local export = "PriorityFader-1:" .. ProfileChecksum(body) .. "\n" .. body
+    local export = "FrameGambit-1:" .. ProfileChecksum(body) .. "\n" .. body
     local valid, reason = self:ParseProfileImport(export)
     if not valid then return nil, "This profile cannot be exported: " .. reason end
     return export
@@ -1953,9 +2013,40 @@ end
 
 function ns:ParseProfileImport(text)
     if type(text) ~= "string" or #text > 60000 then return ImportFailure("Paste a Frame Gambit export under 60 KB.") end
-    text = text:gsub("\r\n", "\n"):gsub("\n+$", "")
-    local checksum, body = text:match("^PriorityFader%-1:([0-9A-Fa-f]+)\r?\n([%s%S]+)$")
-    if not checksum or not body or checksum:upper() ~= ProfileChecksum(body) then return ImportFailure("That export is incomplete or has been changed.") end
+    -- Retail's multiline edit controls and the Windows clipboard do not
+    -- always agree on a newline representation. Normalize CRLF, bare CR,
+    -- a possible UTF-8 clipboard marker, and harmless outer whitespace before
+    -- checking the checksum. Export fields percent-encode meaningful spaces,
+    -- so trimming spaces/tabs at line edges cannot alter profile data.
+    text = text:gsub("^\239\187\191", ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+    text = text:match("^%s*(.-)%s*$") or ""
+    local checksum, body = text:match("^FrameGambit%-1:([0-9A-Fa-f]+)\r?\n([%s%S]+)$")
+    if not checksum then checksum, body = text:match("^PriorityFader%-1:([0-9A-Fa-f]+)\r?\n([%s%S]+)$") end
+    if not checksum or not body then return ImportFailure("That export is incomplete or has been changed.") end
+    -- WoW EditBox text treats a vertical bar as an escape introducer. A
+    -- copied/pasted export can therefore return every visible separator as
+    -- two bars. A T record has no empty fields, so its exact alternating
+    -- shape is an unambiguous transport marker; decode the whole body once.
+    local targetProbe = body:match("\n(T[^\n]*)")
+    local transportPipeRun = targetProbe
+        and targetProbe:match("^T(|+)[^|]+%1[^|]+%1[^|]+%1[^|]+%1[^|]+$")
+    local wowEscapedPipes = transportPipeRun and #transportPipeRun > 1 or false
+    if wowEscapedPipes then
+        -- Decode exactly the separator width proven by the T record. This
+        -- also survives an extra clipboard round trip (|||| separators),
+        -- while preserving genuine adjacent empty fields in R records.
+        body = body:gsub(transportPipeRun, "|")
+    end
+
+    local checksumAdjusted = checksum:upper() ~= ProfileChecksum(body)
+    if checksumAdjusted then
+        local normalized = {}
+        for line in body:gmatch("[^\n]+") do
+            normalized[#normalized + 1] = line:match("^[ \t]*(.-)[ \t]*$") or line
+        end
+        body = table.concat(normalized, "\n")
+        checksumAdjusted = checksum:upper() ~= ProfileChecksum(body)
+    end
     local lines = {}
     for line in body:gmatch("[^\r\n]+") do lines[#lines + 1] = line end
     if lines[1] ~= "PF1" then return ImportFailure("This is not a Frame Gambit profile export.") end
@@ -1984,7 +2075,17 @@ function ns:ParseProfileImport(text)
                 return ImportFailure("A Minimap marker setting is invalid.")
             end
             profile.targets[targetID].nativeMarkerMode = mode
-        elseif tag == "R" and #fields == 7 then
+        elseif tag == "R" and #fields >= 5 then
+            -- Duration and extra requirements are optional for state rows.
+            -- Some clipboard paths trim one or both trailing empty fields, so
+            -- restore those empty optionals before the strict record checks.
+            -- Extra separators are also harmless only when every added field
+            -- is empty; never discard actual unknown reaction data.
+            for fieldIndex = 8, #fields do
+                if fields[fieldIndex] ~= "" then return ImportFailure("A reaction entry has unexpected data.") end
+            end
+            fields[6] = fields[6] or ""
+            fields[7] = fields[7] or ""
             local targetID, condition, requirements = DecodeField(fields[2]), DecodeField(fields[4]), DecodeField(fields[7])
             local id = ImportNumber(fields[3], 1, 1000000000)
             local opacity = ImportNumber(fields[5], 0, 1)
@@ -2090,7 +2191,7 @@ function ns:ParseProfileImport(text)
             if not next(children) then return ImportFailure("A visibility source needs at least one child.") end
             profile.visibilityLinks[parentID] = children
         else
-            return ImportFailure("The export contains an unknown entry.")
+            return ImportFailure("Line " .. index .. " is not a recognized profile entry (" .. tostring(tag or "?") .. ", " .. #fields .. " fields).")
         end
     end
     for _, record in pairs(reactionByID) do
@@ -2149,19 +2250,69 @@ function ns:ParseProfileImport(text)
             if VisibilityReaches(childID, parentID, {}) then return ImportFailure("The import contains a visibility-inheritance loop.") end
         end
     end
-    return profile, { targets = targetCount, reactions = reactionCount }
+
+    -- Profiles are portable rule sets, not assumptions about another
+    -- player's addon stack. Resolve every target through this client's
+    -- adapters: a shared EUI/Blizzard id naturally chooses the recipient's
+    -- available frame, while missing addon and picker targets are skipped.
+    local compatible, skippedIDs = {}, {}
+    local importedTargetCount, importedReactionCount, skippedReactionCount = 0, 0, 0
+    for targetID, settings in pairs(profile.targets) do
+        local frame = self.ResolveTarget and self:ResolveTarget(targetID)
+        if frame then
+            compatible[targetID] = true
+            importedTargetCount = importedTargetCount + 1
+            importedReactionCount = importedReactionCount + #(settings.reactions or {})
+        else
+            skippedIDs[#skippedIDs + 1] = targetID
+            skippedReactionCount = skippedReactionCount + #(settings.reactions or {})
+        end
+    end
+    for _, targetID in ipairs(skippedIDs) do profile.targets[targetID] = nil end
+
+    for groupID, group in pairs(profile.groups) do
+        local memberCount = 0
+        for memberID in pairs(group.members or {}) do
+            if compatible[memberID] then memberCount = memberCount + 1 else group.members[memberID] = nil end
+        end
+        if memberCount < 2 then profile.groups[groupID] = nil end
+    end
+    local function PruneRelationships(graph)
+        for parentID, children in pairs(graph) do
+            if not compatible[parentID] then
+                graph[parentID] = nil
+            else
+                for childID in pairs(children) do if not compatible[childID] then children[childID] = nil end end
+                if not next(children) then graph[parentID] = nil end
+            end
+        end
+    end
+    PruneRelationships(profile.links)
+    PruneRelationships(profile.visibilityLinks)
+
+    return profile, {
+        targets = importedTargetCount,
+        reactions = importedReactionCount,
+        sourceTargets = targetCount,
+        sourceReactions = reactionCount,
+        skippedTargets = #skippedIDs,
+        skippedReactions = skippedReactionCount,
+        clipboardAdjusted = wowEscapedPipes or checksumAdjusted,
+    }
 end
 
 function ns:ImportProfile(name, text)
     name = NormalizeProfileName(name)
     if not name then return false, "Use a valid new profile name." end
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     if FindProfileName(db, name) then return false, "That profile name is already in use." end
     local profile, summary = self:ParseProfileImport(text)
     if not profile then return false, summary end
+    -- Save the validated profile before any live-profile switch. Restoring
+    -- frame leases and rebuilding the editor is a separate action and must
+    -- not be able to make a successful import appear to do nothing.
+    db.profiles = type(db.profiles) == "table" and db.profiles or {}
     db.profiles[name] = profile
-    local ok, reason = self:SelectProfile(name)
-    if not ok then db.profiles[name] = nil; return false, reason end
     return true, summary
 end
 
@@ -3077,7 +3228,7 @@ function ns:HasEvaluatorWork()
     -- keeps the evaluator alive for mouse, motion, moments and late adapter
     -- availability.  We only idle when there is literally no controlled UI,
     -- no Cinematic scene, and no unfinished ownership/transition work.
-    if not PriorityFaderDB then return true end
+    if not FrameGambitDB then return true end
     if self:IsCinematicActive() then return true end
     local profile = self:Profile()
     for _, settings in pairs(type(profile.targets) == "table" and profile.targets or {}) do
@@ -3154,7 +3305,7 @@ local function DiagnosticMessage(text, color)
 end
 
 function ns:RunDiagnostics()
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     local profile = db and db.profiles and db.profiles[db.profile]
     if type(profile) ~= "table" then
         DiagnosticMessage("No active saved profile is loaded. Reload UI before using the audit.", self.COLORS.amber)
@@ -3389,8 +3540,10 @@ driver:SetScript("OnEvent", function(_, event, ...)
         end
     end
     if event == "PLAYER_LOGIN" then
-        PriorityFaderDB = CopyDefaults(DEFAULTS, PriorityFaderDB)
+        ns:AdoptLegacySettings()
+        FrameGambitDB = CopyDefaults(DEFAULTS, FrameGambitDB)
         ns:MigrateDatabase()
+        ns:MigrateLegacyCinematicBinding()
         if ns.RegisterStoredCustomFrames then ns:RegisterStoredCustomFrames() end
         ns:EnsureCinematicProfile()
         if ns.RefreshCinematicLetterbox then ns:RefreshCinematicLetterbox() end
@@ -3461,12 +3614,13 @@ driver:SetScript("OnEvent", function(_, event, ...)
     -- objects, so only explicit editor actions redraw it.
 end)
 
-SLASH_PRIORITYFADER1 = "/pfader"
-SLASH_PRIORITYFADER2 = "/priorityfader"
-SLASH_PRIORITYFADER3 = "/framegambit"
-SLASH_PRIORITYFADER4 = "/fgambit"
-SLASH_PRIORITYFADER5 = "/fg"
-function PriorityFader_ToggleCinematic()
+SLASH_FRAMEGAMBIT1 = "/framegambit"
+SLASH_FRAMEGAMBIT2 = "/fg"
+SLASH_FRAMEGAMBIT3 = "/fgambit"
+-- Legacy entry points deliberately remain available for existing macros.
+SLASH_FRAMEGAMBIT4 = "/pfader"
+SLASH_FRAMEGAMBIT5 = "/priorityfader"
+function FrameGambit_ToggleCinematic()
     local ok, reason, enabled = ns:ToggleCinematic()
     if not ok and DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
         DEFAULT_CHAT_FRAME:AddMessage("|cff9D75FFFrame Gambit|r " .. tostring(reason or "Cinematic Mode could not be toggled."))
@@ -3476,15 +3630,18 @@ function PriorityFader_ToggleCinematic()
     end
 end
 
-SlashCmdList.PRIORITYFADER = function(message)
+SlashCmdList.FRAMEGAMBIT = function(message)
     local command = (message or ""):match("^%s*(.-)%s*$"):lower()
     if command == "pick" then
         ns:StartPicker()
     elseif command == "audit" or command == "status" then
         ns:RunDiagnostics()
     elseif command == "cinematic" or command == "cinema" then
-        PriorityFader_ToggleCinematic()
+        FrameGambit_ToggleCinematic()
     else
         ns:ToggleOptions()
     end
 end
+
+PriorityFader_ToggleCinematic = FrameGambit_ToggleCinematic
+SlashCmdList.PRIORITYFADER = SlashCmdList.FRAMEGAMBIT

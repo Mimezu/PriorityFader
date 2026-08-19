@@ -17,7 +17,7 @@
 - A guarded post-hook on a currently leased root closes one-frame races when
   its owner calls Show or SetAlpha. The host's latest requested alpha remains
   the restoration value; the hook is inert outside Cinematic Mode.
-- The mode has an unbound native keybinding, `/pfader cinematic`, and an
+- The mode has an unbound native keybinding, `/fg cinematic`, and an
   in-addon shortcut capture. Binding edits are unavailable in combat.
 
 ## Current foundation (v2.2.2)
@@ -49,7 +49,7 @@
 ## Ellesmere Cooldown Manager
 
 Version 2.5 uses the stable Blizzard Cooldown Manager viewers as the ownership
-boundary. This keeps Priority Fader above EllesmereUI: EUI continues to style,
+boundary. This keeps Frame Gambit above EllesmereUI: EUI continues to style,
 position, group, and animate icons, while PF fades the Cooldowns, Utility, or
 Buffs viewer as a whole.
 
@@ -67,8 +67,8 @@ incorrectly reveal a bar that Ellesmere intentionally hid.
 Before adding them, define an opt-in adapter contract that supplies:
 
 - a stable hover rectangle or composite rectangle;
-- a host-visible signal that is independent from Priority Fader's alpha; and
-- a way to restore only Priority Fader's contribution without overriding the
+- a host-visible signal that is independent from Frame Gambit's alpha; and
+- a way to restore only Frame Gambit's contribution without overriding the
   host's visibility decision.
 
 Normal target adapters never inspect external databases or execute global-frame

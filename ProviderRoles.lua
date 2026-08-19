@@ -137,8 +137,9 @@ events:SetScript("OnEvent", function(_, _, addonName)
     end
 end)
 
-PriorityFaderAPI = PriorityFaderAPI or {}
-PriorityFaderAPI.version = 2
-function PriorityFaderAPI.RegisterSceneProvider(definition)
+FrameGambitAPI = FrameGambitAPI or {}
+FrameGambitAPI.version = 2
+function FrameGambitAPI.RegisterSceneProvider(definition)
     return ns:RegisterSceneProvider(definition)
 end
+PriorityFaderAPI = FrameGambitAPI

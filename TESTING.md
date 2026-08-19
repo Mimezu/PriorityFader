@@ -1,8 +1,68 @@
 # Frame Gambit Retail validation
 
 Run this with Ellesmere enabled on a character that can enter and leave combat.
-Use `/pfader audit` before and after the pass; it is read-only and reports the
+Use `/fg audit` before and after the pass; it is read-only and reports the
 active profile, graph consistency, and currently unavailable adapters.
+
+## Profile import / export
+
+1. Open **Profiles**, then **Export**. Confirm there is one close button, the
+   export starts at its first line, and mouse-wheel scrolling reaches both ends.
+2. Copy the export, close it, then open **Import**. Confirm the profile picker is
+   hidden, a unique profile name is already filled in, and only one close button
+   is visible.
+   Before opening Import, confirm the Profiles description sits on its own row
+   and never overlaps the Import or Export buttons.
+3. Paste the export. Confirm the status reads **Ready to import** with target and
+   reaction counts and the text viewport remains clipped below the description.
+4. Click **Import profile**. Confirm the profile list returns, displays the new
+   profile, and shows a teal success message. Select the profile separately and
+   confirm its targets and reactions match the source.
+5. Repeat with malformed text and with an existing profile name. Confirm the
+   dialog stays open and shows a readable error instead of failing silently.
+6. Import this exact minimal current-format fixture. It must report one target
+   and two reactions, then create the named profile. Repeat after deleting one
+   and then both trailing `|` characters from each `R` line; all three forms
+   must import identically because those two fields are optional for states:
+
+   ```text
+   FrameGambit-1:B0C6
+   PF1
+   T|eui_player|1|0.12|0.2|0.8
+   R|eui_player|1|mouseover|1||
+   R|eui_player|2|combat|1||
+   ```
+7. Exercise Retail's actual edit-box transport: Export, copy the displayed
+   text, paste it into Import, and confirm the internally doubled separators
+   are decoded once. The visible `T` row above must parse as 6 fields, even
+   when `EditBox:GetText()` returns it as
+   `T||eui_player||1||0.12||0.2||0.8` (11 fields before transport decoding).
+8. Share a profile between two installations with different addons. Import
+   must keep every target that resolves through the recipient's current
+   Blizzard/addon adapters, skip unavailable and unknown targets, remove their
+   group/link/visibility edges, and report both imported and skipped counts.
+   Selecting the imported profile must never add a ghost target or fail because
+   a sender-only addon is absent.
+
+## Priority Fader → Frame Gambit migration
+
+1. With an existing `PriorityFader.lua` SavedVariables file and no
+   `FrameGambit.lua`, install the transition ZIP. It must provide the new
+   `FrameGambit` addon and the minimal `PriorityFader` settings bridge. Log in
+   and confirm the selected profile, every target, reaction, relationship,
+   custom target, Cinematic setting, and tutorial state match the old
+   configuration before any rule evaluates. The bridge must not load any old
+   Frame Gambit UI or evaluator code.
+2. Confirm a prior Cinematic keybind is now assigned to
+   **Toggle Frame Gambit Cinematic Mode**. Assign a different new keybind,
+   reload, and confirm the new binding wins over any remaining legacy value.
+3. Open an old `PriorityFader-1:` profile export and import it successfully.
+   Export the same profile and confirm its prefix is `FrameGambit-1:`.
+4. Confirm `/fg` and `/framegambit` open the editor. Existing `/pfader` and
+   `/priorityfader` macros must continue opening the same Frame Gambit editor.
+5. Verify `FrameGambitAPI.RegisterTarget` and the legacy
+   `PriorityFaderAPI.RegisterTarget` both register the same safe external
+   target without creating duplicate rows.
 
 ## Help Center and guided tutorial
 
@@ -69,14 +129,21 @@ active profile, graph consistency, and currently unavailable adapters.
    PvP, Calendar, Professions, Macro, Key Bindings, and Escape. None may open
    invisibly or retain mouse input; closing it returns that window to the
    Cinematic blackout.
-9. Press **Cinematic mode edit**. The main editor must stay open,
-   gain its orange border and show a separate inline Cinematic strip without
-   covering the subtitle or Presence
-   panel. Managed dots and live-state accents must be orange; unavailable
-   target dots and warning/confirm states must be red. Use the strip's
-   `Turn off` button to return to the previous profile without closing the
-   editor. Slash/keybinding activation still closes the editor with other game
-   panels.
+9. Press **Cinematic mode edit**. The main editor must stay open, gain its
+   orange border, and show a separate inline Cinematic strip without covering
+   the subtitle or Presence panel. The strip must contain only a broad Black
+   bars group and a separated Shortcut group—no Scene label or duplicate Turn
+   off action. Managed dots and live-state accents must be orange; unavailable
+   target dots and warning/confirm states must be red. Use **Exit cinematic
+   edit** in the header, or choose a normal profile, to return without closing
+   the editor. Slash/keybinding activation still closes the editor with other
+   game panels.
+10. Resize the editor below 1080 UI units. The descriptive subtitle must hide
+    while Help, Preview, Profile, and Cinematic remain a stable right-aligned
+    cluster; widening the editor must restore the subtitle. Confirm the
+    Transition & relationships title icon shares one baseline with its title,
+    all action cards use equal compact spacing, and Visibility child has no
+    oversized empty footer inside its card.
 
 ## Out of combat
 
@@ -266,11 +333,11 @@ active profile, graph consistency, and currently unavailable adapters.
    use a muted deep-red border/text treatment. Start a reaction drag and
    confirm the ghost repeats those same icons.
 5. In normal mode, **Cinematic mode edit** is a normal-style header entry
-   action with an amber label. Once active it becomes a full amber, non-exit
-   status marker; **Turn off** in the inline strip must return to the prior profile, while the
-   **Editing: Cinematic** profile control must open the profile picker. Choose
-   a normal profile there and verify it exits Cinematic editing and switches
-   to that profile without an editor notice.
+   action with an amber label. Once active it becomes the full amber **Exit
+   cinematic edit** action and must return to the prior profile. The
+   **Editing: Cinematic** profile control must also remain available; choose a
+   normal profile there and verify it exits Cinematic editing and switches to
+   that profile without an editor notice.
 6. Confirm the right inspector uses a compact Transition title/icon, separate
    Fade and Wait buttons, a Frame outline / Preview card, and three icon-led
    relationship cards. Tooltips must retain the explanatory detail.

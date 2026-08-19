@@ -87,7 +87,7 @@ local function HookAuthority()
     return state.hooked
 end
 
-function proxy:GetPriorityFaderVisualFrame()
+function proxy:GetFrameGambitVisualFrame()
     return VisualFrame()
 end
 
@@ -116,11 +116,11 @@ end
 -- Public adapter contract for host-owned animated surfaces. These methods are
 -- deliberately informational: calling EUI's supported SetChatAlpha remains
 -- the only safe way to affect the complete chat stack.
-function proxy:GetPriorityFaderTimingOwner()
+function proxy:GetFrameGambitTimingOwner()
     return "Ellesmere Chat"
 end
 
-function proxy:GetPriorityFaderTimingNote()
+function proxy:GetFrameGambitTimingNote()
     return "Ellesmere owns fade speed; Frame Gambit controls rule priority and wait."
 end
 
@@ -165,7 +165,7 @@ local function Install()
     target.skipManagedAlphaHook = true
     target.timingOwner = "host"
     target.timingLabel = "EUI fade"
-    target.timingNote = proxy:GetPriorityFaderTimingNote()
+    target.timingNote = proxy:GetFrameGambitTimingNote()
     target.capability = "Complete Ellesmere chat"
     target.capabilityTone = "teal"
     target.capabilityNote = "Fades Ellesmere's messages, panel, tabs, sidebar and chrome together. Ellesmere keeps styling, chat data, layout, interaction behavior, and physical fade duration."

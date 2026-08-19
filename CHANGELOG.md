@@ -2,6 +2,92 @@
 
 ## Unreleased
 
+## 2.11.0 - Frame Gambit public milestone
+
+- Completes the Frame Gambit package rename with a safe Priority Fader
+  settings bridge and backward-compatible commands, exports, and integrations.
+- Rebuilds profile import/export for reliable WoW clipboard round trips and
+  portable sharing across different Blizzard and addon frame setups.
+- Refines the main and Cinematic editors, relationship controls, condition
+  picker, reaction reordering, tutorial flow, and compact-window layouts.
+- Adds an illustrated GitHub overview and publishes both the Frame Gambit
+  folder and its migration bridge in the install-ready release ZIP.
+
+## 2.10.9 - Profile picker header spacing
+
+- Gives the Profiles description its own full-width row beneath the header
+  actions, preventing it from overlapping Import and Export.
+
+## 2.10.8 - WoW edit-box import round trip
+
+- Detects and decodes Retail EditBox pipe escaping before checksum and record
+  validation. A copied export whose visible `T` row has six fields no longer
+  reaches the parser as eleven alternating fields.
+- Makes shared profiles installation-aware: compatible target IDs resolve to
+  the recipient's available Blizzard/addon frames, while unavailable targets
+  and their dangling relationships are skipped with an explicit count.
+
+## 2.10.7 - Cinematic editor composition and import compatibility
+
+- Makes **Exit cinematic edit** the single scene-exit action, keeps normal
+  profile switching available, and replaces the duplicate Scene/Turn off
+  controls with clearly separated Black bars and Shortcut groups.
+- Aligns and compacts Transition & relationships, its action cards, and the
+  reduced-width header while preserving Frame Gambit's existing skin.
+- Parses state-reaction exports when the WoW clipboard removes either or both
+  trailing empty optional fields, and reports the exact line shape for any
+  genuinely unrecognized entry.
+
+## 2.10.6 - Clipboard-safe profile parsing
+
+- Normalizes CRLF, bare carriage returns, clipboard BOM markers, outer
+  whitespace, and harmless line-edge whitespace before validating an import.
+  The checksum is advisory after normalization: structurally valid records are
+  still fully validated and imported when Retail's editor changes invisible
+  clipboard bytes.
+
+## 2.10.5 - Rebuilt profile transfer
+
+- Rebuilds Import/Export around Retail's supported scrolling edit-box widget,
+  keeps the underlying profile picker hidden so only one close control is
+  visible, resets pasted exports to their first line, and validates pasted
+  imports live.
+- Import supplies a unique profile name by default, saves without a live UI
+  switch, returns to a refreshed profile list, and surfaces parser or runtime
+  errors directly in the modal.
+
+## 2.10.4 - Reliable profile import commit
+
+- Imports now save the validated profile before any profile switch or editor
+  rebuild. The picker confirms the result and lets the player select the new
+  profile normally; unexpected runtime errors are shown in the import dialog.
+
+## 2.10.3 - Reliable profile import control
+
+- Simplifies profile import to one **Import profile** action. It validates and
+  imports in the same click, and the control is raised above the long-export
+  text field so pasted content cannot intercept the click.
+
+## 2.10.2 - Reliable renamed-package settings bridge
+
+- Corrects the first rename migration: WoW stores SavedVariables by addon
+  package file, so the `FrameGambit` package alone cannot read the old
+  `PriorityFader.lua` file.
+- Ships a temporary, dependency-ordered `PriorityFader` settings bridge beside
+  the new folder. It loads only the old saved settings and hands them to Frame
+  Gambit before login; it never loads the former addon code.
+
+## 2.10.1 - Frame Gambit package rename
+
+- Renames the install folder, TOC, saved-variable primary name, keybinding,
+  slash-command family, API, addon-owned frame names, and release ZIP to
+  **Frame Gambit**.
+- Automatically adopts existing `PriorityFaderDB` settings at first login and
+  migrates the old Cinematic keybinding when no new one has been chosen. Old
+  slash commands, profile exports, and integration API calls remain compatible.
+- Adds clear update instructions: remove only the old addon folder, keep
+  SavedVariables, and install the new `FrameGambit` folder.
+
 ## 2.10.0 - Clearer Cinematic editor entry
 
 - Renames the header action to **Cinematic mode edit**. When inactive it uses

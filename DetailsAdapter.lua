@@ -207,11 +207,11 @@ local function MakeProxy(index)
     local proxy = {}
     state.proxy = proxy
 
-    function proxy:GetPriorityFaderVisualFrame()
+    function proxy:GetFrameGambitVisualFrame()
         Refresh(state)
         return state.visual
     end
-    function proxy:GetPriorityFaderCinematicFrames()
+    function proxy:GetFrameGambitCinematicFrames()
         if not Refresh(state) then return nil end
         return state.members
     end

@@ -14,7 +14,7 @@ local function NormalizeHeight(value)
 end
 
 function ns:GetCinematicLetterboxSettings()
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     if type(db) ~= "table" then return false, DEFAULT_HEIGHT end
     db.cinematic = type(db.cinematic) == "table" and db.cinematic or {}
     local cinematic = db.cinematic
@@ -43,8 +43,8 @@ function ns:CreateCinematicLetterbox()
         frame:Hide()
         return frame
     end
-    self.CinematicLetterboxTop = Bar("PriorityFaderCinematicLetterboxTop", "TOP")
-    self.CinematicLetterboxBottom = Bar("PriorityFaderCinematicLetterboxBottom", "BOTTOM")
+    self.CinematicLetterboxTop = Bar("FrameGambitCinematicLetterboxTop", "TOP")
+    self.CinematicLetterboxBottom = Bar("FrameGambitCinematicLetterboxBottom", "BOTTOM")
 end
 
 function ns:IsCinematicLetterboxFrame(frame)
@@ -70,7 +70,7 @@ function ns:RefreshCinematicLetterbox()
 end
 
 function ns:SetCinematicLetterboxEnabled(enabled)
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     if type(db) ~= "table" then return false end
     db.cinematic = type(db.cinematic) == "table" and db.cinematic or {}
     db.cinematic.letterboxEnabled = enabled == true
@@ -79,7 +79,7 @@ function ns:SetCinematicLetterboxEnabled(enabled)
 end
 
 function ns:SetCinematicLetterboxHeight(height)
-    local db = PriorityFaderDB
+    local db = FrameGambitDB
     if type(db) ~= "table" then return false end
     db.cinematic = type(db.cinematic) == "table" and db.cinematic or {}
     db.cinematic.letterboxHeight = NormalizeHeight(height)

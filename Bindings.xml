@@ -1,5 +1,5 @@
 <Bindings>
-    <Binding name="PRIORITYFADER_TOGGLE_CINEMATIC" header="PRIORITYFADER">
-        PriorityFader_ToggleCinematic()
+    <Binding name="FRAMEGAMBIT_TOGGLE_CINEMATIC" header="FRAMEGAMBIT">
+        FrameGambit_ToggleCinematic()
     </Binding>
 </Bindings>
