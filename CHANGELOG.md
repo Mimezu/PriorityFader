@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 2.13.0 - Performance and safety milestone
+
+- Avoids idle editor update loops when selection outlines, drag previews, or
+  the frame picker are not active.
+- Reduces steady-state evaluator allocations, shares cursor and timing reads,
+  filters player-only events earlier, and avoids redundant Cinematic and
+  Minimap work.
+- Caches relationship ancestry lookups and preserves newer host alpha changes
+  during immediate or delayed restoration.
+- Clears in-flight fades when reveal groups or linked relationships change.
+- Rejects altered profile exports and keeps impossible Movement AND
+  requirements out of imported or newly edited profiles.
+
 ## 2.12.0 - Clean standalone release
 
 - Ships one install folder: `FrameGambit`. The temporary Priority Fader

@@ -540,10 +540,10 @@ function ns:CreateOptions()
     selectionOutline:EnableMouse(false); selectionOutline:Hide()
     Backdrop(selectionOutline, { 0, 0, 0, 0 }, C.teal)
     selectionOutline.elapsed = 0
-    selectionOutline:SetScript("OnUpdate", function(self, elapsed)
+    selectionOutline._ticker = function(self, elapsed)
         self.elapsed = self.elapsed + elapsed
         if self.elapsed >= 0.10 then self.elapsed = 0; ns:RefreshSelectionOutline() end
-    end)
+    end
     self.SelectionOutline = selectionOutline
     panel.selectionOutlineEnabled = true
 
@@ -854,7 +854,7 @@ function ns:CreateOptions()
         if ns.CinematicKeyCapture and ns.CinematicKeyCapture:IsShown() then ns.CinematicKeyCapture:Hide() end
         if ns.CloseHelp then ns:CloseHelp() end
         if ns.CancelTutorial then ns:CancelTutorial("editor_closed") end
-        if ns.SelectionOutline and not panel.peeking then ns.SelectionOutline:Hide() end
+        if ns.SelectionOutline and not panel.peeking then ns:RefreshSelectionOutline() end
         ns:StopPreview()
         ns:CancelReactionDrag()
         if panel.peeking then ns:RefreshSelectionOutline() end
@@ -1196,7 +1196,7 @@ function ns:CreateReactionDrag()
     ghost.label = Text(ghost, "GameFontHighlight", "", C.accent)
     ghost.label:SetPoint("LEFT", 65, 0); ghost.label:SetPoint("RIGHT", ghost.requirements, "LEFT", -5, 0)
     ghost.label:SetJustifyH("CENTER")
-    drag:SetScript("OnUpdate", function() ns:UpdateReactionDrag() end)
+    drag._ticker = function() ns:UpdateReactionDrag() end
     self.ReactionDrag = drag
 end
 
@@ -1273,6 +1273,7 @@ function ns:StartReactionDrag(id, reaction, row)
     -- follows the cursor while the real row becomes the reserved empty slot.
     row:SetAlpha(0)
     self:UpdateReactionDragGhost(drag)
+    drag:SetScript("OnUpdate", drag._ticker)
     drag:Show(); drag.ghost:Show(); self:LayoutReactionDragRows(drag); self:UpdateReactionDrag()
 end
 
@@ -1318,6 +1319,7 @@ function ns:CancelReactionDrag(skipRender)
     drag.active, drag.targetID, drag.reaction, drag.row = nil, nil, nil, nil
     drag.sourceIndex, drag.insertIndex, drag.destination = nil, nil, nil
     drag.rowAlpha, drag.grabX, drag.grabY, drag.rowWidth = nil, nil, nil, nil
+    drag:SetScript("OnUpdate", nil)
     drag.ghost:Hide(); drag:Hide()
     if not skipRender and targetID and self.Options and self.Options:IsVisible() and self.Options.selected == targetID then
         self:RenderSelectedTarget(targetID)
@@ -1996,7 +1998,8 @@ function ns:ShowReactionCategory(categoryID)
     local visible = {}
     for _, button in ipairs(palette.conditionButtons) do
         button:Hide()
-        if button.category == categoryID and not (palette.mode == "requirements" and (button.conditionKey == "form" or button.conditionKey == "spec")) then
+        if button.category == categoryID and not (palette.mode == "requirements"
+            and (button.conditionKey == "form" or button.conditionKey == "spec" or button.conditionKey == "movement")) then
             visible[#visible + 1] = button
         end
     end
@@ -2574,17 +2577,18 @@ function ns:RefreshSelectionOutline()
     local outline, panel = self.SelectionOutline, self.Options
     if not outline or not panel or (not panel:IsVisible() and not panel.peeking)
         or panel.selectionOutlineEnabled == false or not panel.selected then
-        if outline then outline:Hide() end
+        if outline then outline:SetScript("OnUpdate", nil); outline:Hide() end
         return
     end
     local frame = self:ResolveTarget(panel.selected)
     local left, bottom, width, height
     if frame then left, bottom, width, height = self:GetUsableFrameRect(frame) end
-    if not left then outline:Hide(); return end
+    if not left then outline:SetScript("OnUpdate", nil); outline:Hide(); return end
     outline:ClearAllPoints()
     outline:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", left - 3, bottom - 3)
     outline:SetSize(width + 6, height + 6)
     outline:SetBackdropBorderColor(unpack(C.teal))
+    if not outline:GetScript("OnUpdate") then outline:SetScript("OnUpdate", outline._ticker) end
     outline:Show()
 end
 
@@ -3044,7 +3048,7 @@ function ns:CreatePicker()
         texture:SetColorTexture(0, 0, 0, 0.52)
         picker.scrim[i] = dim
     end
-    picker:SetScript("OnUpdate", function(self, elapsed)
+    picker._ticker = function(self, elapsed)
         self.updateElapsed = (self.updateElapsed or 0) + elapsed
         if self.overviewIndex then ContinuePickerOverview(self) end
         if self.candidateWireIndex then ContinuePickerCandidateWires(self) end
@@ -3052,10 +3056,11 @@ function ns:CreatePicker()
             self.updateElapsed = 0
             ns:UpdatePicker()
         end
-    end)
+    end
     picker:SetScript("OnMouseWheel", function(_, delta) ns:CyclePicker(delta) end)
     picker:SetScript("OnClick", function() ns:SelectPickerCandidate() end)
     picker:SetScript("OnHide", function(self)
+        self:SetScript("OnUpdate", nil)
         local restore = self.exitReason == "cancel" and self.returnToOptions and not InCombatLockdown()
         local wasCinematicKeep = self.intent == "cinematic_keep"
         self.phase, self.pendingTargetID, self.pendingCandidate, self.candidates, self.index, self.mode, self.intent = nil, nil, nil, nil, 0, nil, nil
@@ -3095,6 +3100,7 @@ function ns:StartPicker(intent)
     self.Picker.use:Hide(); self.Picker.again:Hide(); self.Picker.dock:SetHeight(70)
     self.Picker.help:SetTextColor(unpack(C.muted))
     if self.Options then self.Options:Hide() end
+    self.Picker:SetScript("OnUpdate", self.Picker._ticker)
     self.Picker:Show(); self:UpdatePicker()
 end
 

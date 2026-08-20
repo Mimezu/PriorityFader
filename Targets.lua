@@ -720,9 +720,9 @@ function ns:GetFrameInteractionRect(frame, includeDescendants)
     return cached.left, cached.bottom, cached.width, cached.height
 end
 
-function ns:FrameInteractionContainsCursor(frame, includeDescendants)
+function ns:FrameInteractionContainsCursor(frame, includeDescendants, x, y)
     local left, bottom, width, height = self:GetFrameInteractionRect(frame, includeDescendants)
-    local x, y = self:GetUICursorPosition()
+    if type(x) ~= "number" or type(y) ~= "number" then x, y = self:GetUICursorPosition() end
     if not left or not x or not y then return false end
     return x >= left and x <= left + width and y >= bottom and y <= bottom + height
 end

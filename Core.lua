@@ -1,7 +1,7 @@
 local ADDON, ns = ...
 
 ns.NAME = "Frame Gambit"
-ns.VERSION = "2.12.0"
+ns.VERSION = "2.13.0"
 BINDING_HEADER_FRAMEGAMBIT = "Frame Gambit"
 BINDING_NAME_FRAMEGAMBIT_TOGGLE_CINEMATIC = "Toggle Frame Gambit Cinematic Mode"
 local CINEMATIC_BINDING = "FRAMEGAMBIT_TOGGLE_CINEMATIC"
@@ -240,6 +240,8 @@ local runtime = {
     active = {},
     moments = {},
     context = {},
+    neededConditions = {},
+    hoverNeeded = {},
     fadeOutStarted = {},
     revealGoal = {},
     transitions = {},
@@ -261,6 +263,19 @@ local runtime = {
     cinematicAuditAt = 0,
     cinematicRevealActive = nil,
     cinematicRescanToken = 0,
+    -- Relationship lookups are on the shared evaluator path.  Keep a small
+    -- reverse index so linked/visibility ancestry does not rescan every
+    -- profile relationship for every target on every tick.
+    relationshipCache = {
+        valid = false,
+        profile = nil,
+        links = nil,
+        visibilityLinks = nil,
+        groups = nil,
+        linkParents = {},
+        visibilityParents = {},
+        hoverMembers = {},
+    },
     lastTick = 0,
     lastMouseTick = 0,
     playerCasting = false,
@@ -274,6 +289,7 @@ ns.runtime = runtime
 local driver
 
 local SafeFrameAlpha
+local QueuePendingRestore
 
 local function IsSecret(value)
     return issecretvalue and issecretvalue(value) or false
@@ -311,6 +327,11 @@ end
 
 local function SafeSetFrameAlpha(frame, alpha)
     return pcall(CallFrameSetAlpha, frame, alpha)
+end
+
+local function ClearTable(values)
+    for key in pairs(values) do values[key] = nil end
+    return values
 end
 
 local function IsLocalLootMessage(senderName, senderGUID)
@@ -363,6 +384,69 @@ function ns:Profile()
     profile.nextReactionID = tonumber(profile.nextReactionID) or 1
     profile.nextGroupID = tonumber(profile.nextGroupID) or 1
     return profile
+end
+
+local function InvalidateRelationshipCache()
+    runtime.relationshipCache.valid = false
+end
+
+local function GetRelationshipIndices(owner)
+    local profile = owner:Profile()
+    local links = profile.links
+    local visibilityLinks = profile.visibilityLinks
+    local groups = profile.groups
+    local cache = runtime.relationshipCache
+    if cache.valid and cache.profile == profile and cache.links == links
+        and cache.visibilityLinks == visibilityLinks and cache.groups == groups then
+        return cache
+    end
+
+    local linkParents, visibilityParents, hoverMembers = {}, {}, {}
+    for parentID, children in pairs(links or {}) do
+        if type(children) == "table" then
+            for childID, enabled in pairs(children) do
+                -- Link relationships historically treated any truthy value as
+                -- enabled, so retain that compatibility while indexing.
+                if enabled then
+                    local parents = linkParents[childID]
+                    if not parents then parents = {}; linkParents[childID] = parents end
+                    parents[#parents + 1] = parentID
+                end
+            end
+        end
+    end
+    for parentID, children in pairs(visibilityLinks or {}) do
+        if type(children) == "table" then
+            for childID, enabled in pairs(children) do
+                if enabled == true and visibilityParents[childID] == nil then
+                    visibilityParents[childID] = parentID
+                end
+            end
+        end
+    end
+    for _, group in pairs(groups or {}) do
+        if type(group) == "table" and type(group.members) == "table" then
+            local members = {}
+            for memberID, enabled in pairs(group.members) do
+                if enabled then members[#members + 1] = memberID end
+            end
+            for _, memberID in ipairs(members) do
+                local peers = hoverMembers[memberID]
+                if not peers then peers = {}; hoverMembers[memberID] = peers end
+                for _, peerID in ipairs(members) do peers[#peers + 1] = peerID end
+            end
+        end
+    end
+
+    cache.profile = profile
+    cache.links = links
+    cache.visibilityLinks = visibilityLinks
+    cache.groups = groups
+    cache.linkParents = linkParents
+    cache.visibilityParents = visibilityParents
+    cache.hoverMembers = hoverMembers
+    cache.valid = true
+    return cache
 end
 
 function ns:NextReactionID()
@@ -700,6 +784,10 @@ function ns:MigrateDatabase()
         RemoveProfileTargets(profile, function(id) return type(id) == "string" and id:match("^session_frame_") end)
     end
     db.version = 11
+    -- Migrations normalize relationship tables in place. Their identities do
+    -- not change, so invalidate the evaluator index explicitly in case a
+    -- startup hook inspected it before migration completed.
+    InvalidateRelationshipCache()
 end
 
 function ns:GetTutorialState()
@@ -1063,12 +1151,12 @@ local function IsCinematicDataBarFrame(frame)
         or (type(name) == "string" and name:match("^EllesmereUIDataBarsBar%d+$") ~= nil)
 end
 
-function ns:RefreshCinematicExemptions()
+function ns:RefreshCinematicExemptions(rootSnapshot)
     local frames = setmetatable({}, { __mode = "k" })
     if self.AddSceneProviderExemptions then self:AddSceneProviderExemptions(frames) end
     -- These are presentation bars.  Let their addons retain all frame and
     -- input ownership; the LOW-strata letterbox stays behind their UI layer.
-    for _, root in ipairs(self:GetUIParentFrameRoots(true)) do
+    for _, root in ipairs(rootSnapshot or self:GetUIParentFrameRoots(true)) do
         if IsCinematicDataBarFrame(root) then frames[root] = true end
         if IsCinematicOpenWindow(root, SafeFrameName(root)) then runtime.cinematicOpenWindows[root] = true end
     end
@@ -1345,9 +1433,10 @@ function ns:BeginCinematicBlackout()
     if not self:IsCinematicActive() or not self.GetUIParentFrameRoots then return false end
     if InCombatLockdown() then runtime.cinematicScanPending = true; return false, "Cinematic blackout will scan when combat ends." end
     runtime.cinematicScanPending = nil
-    self:RefreshCinematicExemptions()
+    local roots = self:GetUIParentFrameRoots(true)
+    self:RefreshCinematicExemptions(roots)
     local count = 0
-    for _, root in ipairs(self:GetUIParentFrameRoots(true)) do
+    for _, root in ipairs(roots) do
         if LeaseCinematicFrame(self, root) then count = count + 1 end
     end
     -- Shared structural roots (currently Ellesmere's secure unit hider) stay
@@ -1385,10 +1474,10 @@ function ns:UpdateCinematicBlackout(force)
         if exempt then
             local current = SafeFrameAlpha(root)
             if current == nil then
-                runtime.pendingRestore[root] = record.baseAlpha
+                QueuePendingRestore(root, record.baseAlpha, record.appliedAlpha)
             elseif math.abs(current - (record.appliedAlpha or current)) < 0.01
                 and not SetCinematicFrameAlpha(root, record.baseAlpha) then
-                runtime.pendingRestore[root] = record.baseAlpha
+                QueuePendingRestore(root, record.baseAlpha, record.appliedAlpha)
             end
             runtime.cinematicBlackout[root] = nil
         else
@@ -1430,9 +1519,11 @@ function ns:EndCinematicBlackout()
         local current = SafeFrameAlpha(root)
         runtime.cinematicBlackout[root] = nil
         if current ~= nil and math.abs(current - (record.appliedAlpha or current)) < 0.01 then
-            if not SetCinematicFrameAlpha(root, record.baseAlpha) then runtime.pendingRestore[root] = record.baseAlpha end
+            if not SetCinematicFrameAlpha(root, record.baseAlpha) then
+                QueuePendingRestore(root, record.baseAlpha, record.appliedAlpha)
+            end
         elseif current == nil then
-            runtime.pendingRestore[root] = record.baseAlpha
+            QueuePendingRestore(root, record.baseAlpha, record.appliedAlpha)
         end
     end
     runtime.cinematicBlackoutCount = 0
@@ -1499,6 +1590,7 @@ function ns:ResetCinematicProfile()
     for id in pairs(runtime.revealGoal) do runtime.revealGoal[id] = nil end
     for id in pairs(runtime.transitions) do runtime.transitions[id] = nil end
     profile.targets, profile.groups, profile.links, profile.visibilityLinks = {}, {}, {}, {}
+    InvalidateRelationshipCache()
     profile.nextReactionID, profile.nextGroupID = 1, 1
     for _, component in ipairs(CINEMATIC_COMPONENTS) do
         profile.targets[component.id] = NewCinematicSettings(profile, component.default, component.rest,
@@ -1620,7 +1712,7 @@ function ns:GetTargetSettings(id, create)
         -- Saved variables outlive versions.  Keep a partial or older record
         -- harmless instead of letting the update loop index nil values.
         settings.enabled = settings.enabled ~= false
-        settings.atRest = tonumber(settings.atRest) or 0.12
+        settings.atRest = math.max(0, math.min(1, tonumber(settings.atRest) or 0.12))
         settings.fadeDuration = math.max(0.05, math.min(2, tonumber(settings.fadeDuration) or 0.20))
         settings.fadeDelay = math.max(0, math.min(15, tonumber(settings.fadeDelay) or 0.80))
         if id == "minimap" and settings.nativeMarkerMode ~= nil
@@ -1657,7 +1749,9 @@ function ns:GetTargetSettings(id, create)
                     end
                     local requirements, seen = {}, {}
                     for _, condition in ipairs(type(reaction.requirements) == "table" and reaction.requirements or {}) do
-                        if type(condition) == "string" and condition ~= reaction.condition and condition ~= "form" and condition ~= "spec" and not seen[condition] then
+                        if type(condition) == "string" and condition ~= reaction.condition
+                            and condition ~= "form" and condition ~= "spec" and condition ~= "movement"
+                            and not seen[condition] then
                             requirements[#requirements + 1], seen[condition] = condition, true
                         end
                     end
@@ -1731,13 +1825,22 @@ function ns:RestoreControlledFrame(id)
     if not frame then return end
     local target = self.TargetByID[id]
     local alpha = runtime.baseAlpha[frame]
+    local lastApplied = runtime.currentAlpha[frame]
     runtime.managedIDByFrame[frame] = nil
-    runtime.managedAlphaGuard[frame] = true
-    local restored = alpha == nil or SafeSetFrameAlpha(frame, alpha)
-    runtime.managedAlphaGuard[frame] = nil
+    local live = SafeFrameAlpha(frame)
+    local restored = alpha == nil
+    if alpha ~= nil and live ~= nil and lastApplied ~= nil
+        and math.abs(live - lastApplied) > 0.001 then
+        -- The host reclaimed its alpha after our last write. Releasing
+        -- ownership must not overwrite that newer host-owned value.
+        restored = true
+    elseif alpha ~= nil and live ~= nil then
+        runtime.managedAlphaGuard[frame] = true
+        restored = SafeSetFrameAlpha(frame, alpha)
+        runtime.managedAlphaGuard[frame] = nil
+    end
     if alpha ~= nil and not restored then
-        runtime.pendingRestore[frame] = alpha
-        if target and target.release then runtime.pendingRelease[frame] = target.release end
+        QueuePendingRestore(frame, alpha, lastApplied, target and target.release)
     elseif target and target.release then
         pcall(target.release, frame)
     end
@@ -1795,6 +1898,7 @@ function ns:SelectProfile(name, preserveCinematicReturn)
     for id in pairs(runtime.transitions) do runtime.transitions[id] = nil end
     for id in pairs(runtime.immediateApply) do runtime.immediateApply[id] = nil end
     db.profile = name
+    InvalidateRelationshipCache()
     if self.RefreshCinematicLetterbox then self:RefreshCinematicLetterbox() end
     if not preserveCinematicReturn and db.cinematic and db.cinematic.profileName ~= name then
         db.cinematic.returnProfile = nil
@@ -1926,7 +2030,10 @@ function ns:ExportProfile(name)
                     local requirements = {}
                     for _, requirement in ipairs(type(reaction.requirements) == "table" and reaction.requirements or {}) do
                         local requirementInfo = CONDITION_INFO[requirement]
-                        if requirementInfo and not requirementInfo.internal and requirement ~= reaction.condition then requirements[#requirements + 1] = requirement end
+                        if requirementInfo and not requirementInfo.internal and requirement ~= reaction.condition
+                            and requirement ~= "movement" then
+                            requirements[#requirements + 1] = requirement
+                        end
                     end
                     local duration = info.kind == "moment" and math.max(0.5, math.min(30, tonumber(reaction.duration) or info.duration or 3)) or ""
                     lines[#lines + 1] = table.concat({ "R", EncodeField(targetID), reaction.id, EncodeField(reaction.condition), math.max(0, math.min(1, tonumber(reaction.opacity) or 1)), duration, EncodeField(table.concat(requirements, ",")) }, "|")
@@ -2016,6 +2123,9 @@ function ns:ParseProfileImport(text)
         body = table.concat(normalized, "\n")
         checksumAdjusted = checksum:upper() ~= ProfileChecksum(body)
     end
+    if checksumAdjusted then
+        return ImportFailure("That export is incomplete or has been changed.")
+    end
     local lines = {}
     for line in body:gmatch("[^\r\n]+") do lines[#lines + 1] = line end
     if lines[1] ~= "PF1" then return ImportFailure("This is not a Frame Gambit profile export.") end
@@ -2068,7 +2178,11 @@ function ns:ParseProfileImport(text)
             local required, seen = {}, {}
             for requirement in (requirements or ""):gmatch("[^,]+") do
                 local requirementInfo = CONDITION_INFO[requirement]
-                if not requirementInfo or requirementInfo.internal or requirement == condition or requirement == "form" or requirement == "spec" or seen[requirement] then return ImportFailure("A reaction requirement is invalid.") end
+                if not requirementInfo or requirementInfo.internal or requirement == condition
+                    or requirement == "form" or requirement == "spec" or requirement == "movement"
+                    or seen[requirement] then
+                    return ImportFailure("A reaction requirement is invalid.")
+                end
                 required[#required + 1], seen[requirement] = requirement, true
             end
             reactionIDs[id] = true; reactionCount = reactionCount + 1
@@ -2319,6 +2433,7 @@ function ns:RemoveTarget(id)
             profile.visibilityLinks[parentID] = nil
         end
     end
+    InvalidateRelationshipCache()
     if self.ConnectionPicker and self.ConnectionPicker:IsShown() and self.ConnectionPicker.sourceID == id then
         self.ConnectionPicker:Hide()
     end
@@ -2391,6 +2506,11 @@ function ns:AddToRevealGroup(id, memberID)
         groups[memberKey] = nil
     end
     group.members[memberID] = true
+    InvalidateRelationshipCache()
+    -- Group membership changes can alter several members' effective hover
+    -- result while a fade is in flight. Drop those transition leases so the
+    -- next evaluator tick starts from the new relationship graph.
+    for targetID in pairs(mustFit) do self:InvalidateTargetTransition(targetID) end
     self:AddTarget(id)
     self:AddTarget(memberID)
     for targetID in pairs(mustFit) do
@@ -2403,10 +2523,14 @@ end
 function ns:RemoveFromRevealGroup(id)
     local key, group = self:GetRevealGroup(id)
     if not group then return end
+    local affected = {}
+    for memberID in pairs(group.members or {}) do affected[memberID] = true end
     group.members[id] = nil
     local count = 0
     for _ in pairs(group.members) do count = count + 1 end
     if count < 2 then self:Profile().groups[key] = nil end
+    InvalidateRelationshipCache()
+    for memberID in pairs(affected) do self:InvalidateTargetTransition(memberID) end
 end
 
 function ns:GetLinkedChildren(parentID)
@@ -2414,10 +2538,9 @@ function ns:GetLinkedChildren(parentID)
 end
 
 function ns:GetLinkParents(childID)
+    local indexed = GetRelationshipIndices(self).linkParents[childID]
     local parents = {}
-    for parentID, children in pairs(self:Profile().links or {}) do
-        if children[childID] then parents[#parents + 1] = parentID end
-    end
+    for index, parentID in ipairs(indexed or {}) do parents[index] = parentID end
     return parents
 end
 
@@ -2426,6 +2549,9 @@ function ns:RemoveLink(parentID, childID)
     if not links[parentID] then return end
     links[parentID][childID] = nil
     if not next(links[parentID]) then links[parentID] = nil end
+    InvalidateRelationshipCache()
+    self:InvalidateTargetTransition(childID)
+    self:Wake()
 end
 
 function ns:CanAddLink(parentID, childID)
@@ -2450,6 +2576,8 @@ function ns:AddLink(parentID, childID)
     local links = self:Profile().links
     links[parentID] = links[parentID] or {}
     links[parentID][childID] = true
+    InvalidateRelationshipCache()
+    self:InvalidateTargetTransition(childID)
     self:AddTarget(parentID)
     self:AddTarget(childID)
     return true
@@ -2470,9 +2598,7 @@ function ns:GetVisibilityChildren(parentID)
 end
 
 function ns:GetVisibilityParent(childID)
-    for parentID, children in pairs(self:Profile().visibilityLinks or {}) do
-        if type(children) == "table" and children[childID] == true then return parentID end
-    end
+    return GetRelationshipIndices(self).visibilityParents[childID]
 end
 
 function ns:RemoveVisibilityLink(parentID, childID)
@@ -2480,6 +2606,7 @@ function ns:RemoveVisibilityLink(parentID, childID)
     if type(links[parentID]) ~= "table" then return end
     links[parentID][childID] = nil
     if not next(links[parentID]) then links[parentID] = nil end
+    InvalidateRelationshipCache()
     self:InvalidateTargetTransition(childID)
     self:RefreshOptions()
 end
@@ -2522,6 +2649,7 @@ function ns:AddVisibilityLink(parentID, childID)
     local links = profile.visibilityLinks
     links[parentID] = type(links[parentID]) == "table" and links[parentID] or {}
     links[parentID][childID] = true
+    InvalidateRelationshipCache()
     self:InvalidateTargetTransition(childID)
     self:Wake()
     self:RefreshOptions()
@@ -2544,15 +2672,35 @@ end
 
 function ns:RestorePendingAlphas()
     if InCombatLockdown() then return end
-    for frame, alpha in pairs(runtime.pendingRestore) do
+    for frame in pairs(runtime.pendingRestore) do
         self:RestorePendingFrame(frame)
     end
 end
 
 function ns:RestorePendingFrame(frame)
-    local alpha = runtime.pendingRestore[frame]
-    if alpha == nil then return true end
-    if SafeSetFrameAlpha(frame, alpha) then
+    local pending = runtime.pendingRestore[frame]
+    if pending == nil then return true end
+    local baseAlpha, lastApplied
+    if type(pending) == "table" then
+        baseAlpha, lastApplied = pending.base, pending.lastApplied
+    else
+        -- Accept the scalar form left by older code paths during this session.
+        baseAlpha, lastApplied = pending, nil
+    end
+    local current = SafeFrameAlpha(frame)
+    if current ~= nil and lastApplied ~= nil and math.abs(current - lastApplied) > 0.001 then
+        -- The host changed the frame while the restore was waiting (usually
+        -- combat lockdown).  Do not overwrite that newer host-owned value.
+        runtime.pendingRestore[frame] = nil
+        runtime.baseAlpha[frame] = current
+        runtime.currentAlpha[frame] = current
+        runtime.managedAlphaAuditAt[frame] = GetTime()
+        local release = runtime.pendingRelease[frame]
+        runtime.pendingRelease[frame] = nil
+        if release then pcall(release, frame) end
+        return true
+    end
+    if SafeSetFrameAlpha(frame, baseAlpha) then
         runtime.pendingRestore[frame] = nil
         local release = runtime.pendingRelease[frame]
         runtime.pendingRelease[frame] = nil
@@ -2579,8 +2727,8 @@ function ns:UsesCondition(settings, condition)
     return false
 end
 
-local function CollectNeededStateConditions(profile)
-    local needed = {}
+local function CollectNeededStateConditions(profile, needed)
+    needed = ClearTable(needed or {})
     for _, settings in pairs(type(profile.targets) == "table" and profile.targets or {}) do
         if type(settings) == "table" and settings.enabled ~= false then
             for _, reaction in ipairs(type(settings.reactions) == "table" and settings.reactions or {}) do
@@ -2597,8 +2745,23 @@ local function CollectNeededStateConditions(profile)
 end
 
 function ns:BuildStateContext()
-    local needed = CollectNeededStateConditions(self:Profile())
-    local context = {}
+    local needed = CollectNeededStateConditions(self:Profile(), runtime.neededConditions)
+    local context = runtime.context
+    -- Form/spec lookups add short-lived caches while reactions are evaluated.
+    -- Preserve their tables between ticks but clear their contents so changing
+    -- forms or specialization remains observable without steady-state garbage.
+    local formActivity, specActivity = context.formActivity, context.specActivity
+    ClearTable(context)
+    if formActivity then
+        ClearTable(formActivity.known)
+        ClearTable(formActivity.values)
+        context.formActivity = formActivity
+    end
+    if specActivity then
+        ClearTable(specActivity.known)
+        ClearTable(specActivity.values)
+        context.specActivity = specActivity
+    end
     if needed.combat or needed.out_of_combat then
         context.combat = SafeBoolean(InCombatLockdown)
         if context.combat ~= nil then context.out_of_combat = not context.combat end
@@ -2690,7 +2853,6 @@ function ns:BuildStateContext()
     if needed.war_mode and C_PvP then context.war_mode = SafeBoolean(C_PvP.IsWarModeDesired) end
     if needed.indoors then context.indoors = SafeBoolean(IsIndoors) end
     if needed.outdoors then context.outdoors = SafeBoolean(IsOutdoors) end
-    runtime.context = context
 end
 
 -- Returns nil when this entry cannot exist for the current class/spec.  That
@@ -2745,7 +2907,7 @@ function ns:GetSpecActivity(classID, specID)
     return result
 end
 
-function ns:ConditionIsMet(condition, id, reaction, isRequirement)
+function ns:ConditionIsMet(condition, id, reaction, isRequirement, evaluationNow)
     if condition == "mouseover" then return runtime.hovered[id] == true or self:IsConnectionHovered(id) end
     if condition == "form" then
         if isRequirement then return false end
@@ -2765,25 +2927,25 @@ function ns:ConditionIsMet(condition, id, reaction, isRequirement)
     if info and info.kind == "moment" then
         local occurred = runtime.moments[condition]
         local duration = isRequirement and info.duration or reaction.duration or info.duration or 3
-        return occurred and (GetTime() - occurred) <= duration or false
+        return occurred and ((evaluationNow or GetTime()) - occurred) <= duration or false
     end
     -- A nil context value is deliberately unknown, never false.  In
     -- particular, negative rules never become accidentally true in secret UI.
     return runtime.context[condition] == true
 end
 
-function ns:ReactionIsMet(reaction, id)
+function ns:ReactionIsMet(reaction, id, evaluationNow)
     if reaction.enabled == false then return false end
-    if not self:ConditionIsMet(reaction.condition, id, reaction) then return false end
+    if not self:ConditionIsMet(reaction.condition, id, reaction, nil, evaluationNow) then return false end
     for _, condition in ipairs(reaction.requirements or {}) do
-        if not self:ConditionIsMet(condition, id, reaction, true) then return false end
+        if not self:ConditionIsMet(condition, id, reaction, true, evaluationNow) then return false end
     end
     return true
 end
 
 local LINKED_PARENT_HOVER_REACTION = { condition = "linked_parent_hover", opacity = 1, requirements = {}, linkedParent = true }
 
-function ns:Evaluate(id, settings, seen)
+function ns:Evaluate(id, settings, seen, evaluationNow)
     -- Parent hover is an intrinsic part of a directional link. A child only
     -- needs its own Mouseover row when it should also reveal itself. Existing
     -- links retain their generated row and therefore keep their old behavior;
@@ -2792,7 +2954,7 @@ function ns:Evaluate(id, settings, seen)
         return 1, 0, LINKED_PARENT_HOVER_REACTION
     end
     for index, reaction in ipairs(settings.reactions or {}) do
-        if self:ReactionIsMet(reaction, id) then
+        if self:ReactionIsMet(reaction, id, evaluationNow) then
             return reaction.opacity or 1, index, reaction
         end
     end
@@ -2802,7 +2964,7 @@ function ns:Evaluate(id, settings, seen)
         local parentID = self:GetVisibilityParent(id)
         local parentSettings = parentID and self:GetTargetSettings(parentID)
         if parentSettings and parentSettings.enabled ~= false and not seen[parentID] then
-            local opacity, index, reaction, inheritedFrom = self:Evaluate(parentID, parentSettings, seen)
+            local opacity, index, reaction, inheritedFrom = self:Evaluate(parentID, parentSettings, seen, evaluationNow)
             return opacity, index, reaction, inheritedFrom or parentID
         end
     end
@@ -2832,6 +2994,19 @@ SafeFrameAlpha = function(frame)
     local ok, alpha = pcall(CallFrameGetAlpha, frame)
     if not ok or IsSecret(alpha) or type(alpha) ~= "number" or alpha ~= alpha or math.abs(alpha) > 1000 then return nil end
     return alpha
+end
+
+QueuePendingRestore = function(frame, baseAlpha, lastApplied, release)
+    if not frame or type(baseAlpha) ~= "number" then return end
+    runtime.pendingRestore[frame] = {
+        base = baseAlpha,
+        lastApplied = type(lastApplied) == "number" and lastApplied or nil,
+    }
+    if release then
+        runtime.pendingRelease[frame] = release
+    else
+        runtime.pendingRelease[frame] = nil
+    end
 end
 
 local function SetManagedFrameAlpha(frame, alpha)
@@ -2869,39 +3044,34 @@ function ns:HookManagedFrameAlpha(frame)
     end
 end
 
-function ns:FrameContainsCursor(frame)
+function ns:FrameContainsCursor(frame, x, y)
     local left, bottom, width, height = self:GetUsableFrameRect(frame)
     if not left then return false end
-    local cursorOK, x, y = pcall(GetCursorPosition)
-    local scaleOK, scale = pcall(function() return UIParent:GetEffectiveScale() end)
-    if not cursorOK or not scaleOK or IsSecret(x) or IsSecret(y) or IsSecret(scale)
-        or type(x) ~= "number" or type(y) ~= "number" or type(scale) ~= "number"
-        or x ~= x or y ~= y or scale ~= scale or scale <= 0 then return false end
-    x, y = x / scale, y / scale
+    if type(x) ~= "number" or type(y) ~= "number" then
+        local cursorOK, rawX, rawY = pcall(GetCursorPosition)
+        local scaleOK, scale = pcall(function() return UIParent:GetEffectiveScale() end)
+        if not cursorOK or not scaleOK or IsSecret(rawX) or IsSecret(rawY) or IsSecret(scale)
+            or type(rawX) ~= "number" or type(rawY) ~= "number" or type(scale) ~= "number"
+            or rawX ~= rawX or rawY ~= rawY or scale ~= scale or scale <= 0 then return false end
+        x, y = rawX / scale, rawY / scale
+    end
     return x >= left and x <= left + width and y >= bottom and y <= bottom + height
 end
 
 function ns:IsConnectionHovered(id)
-    local profile = self:Profile()
-    for _, group in pairs(profile.groups or {}) do
-        if group.members and group.members[id] then
-            for memberID in pairs(group.members) do
-                if runtime.hovered[memberID] then return true end
-            end
-        end
+    for _, memberID in ipairs(GetRelationshipIndices(self).hoverMembers[id] or {}) do
+        if runtime.hovered[memberID] then return true end
     end
     return self:IsLinkedParentHovered(id)
 end
 
 function ns:IsLinkedParentHovered(id)
-    local profile = self:Profile()
+    local linkParents = GetRelationshipIndices(self).linkParents
     local function AncestorHovered(childID, seen)
         if seen[childID] then return false end
         seen[childID] = true
-        for parentID, children in pairs(profile.links or {}) do
-            if children and children[childID] then
-                if runtime.hovered[parentID] or AncestorHovered(parentID, seen) then return true end
-            end
+        for _, parentID in ipairs(linkParents[childID] or {}) do
+            if runtime.hovered[parentID] or AncestorHovered(parentID, seen) then return true end
         end
         return false
     end
@@ -2910,7 +3080,7 @@ end
 
 function ns:UpdateHover()
     local profile = self:Profile()
-    local needed = {}
+    local needed = ClearTable(runtime.hoverNeeded)
     for id, settings in pairs(profile.targets or {}) do
         if settings.enabled and self:UsesCondition(settings, "mouseover") then needed[id] = true end
     end
@@ -2918,21 +3088,49 @@ function ns:UpdateHover()
         for memberID in pairs(group.members or {}) do needed[memberID] = true end
     end
     for parentID in pairs(profile.links or {}) do needed[parentID] = true end
+    local cursorX, cursorY
+    if next(needed) and self.GetUICursorPosition then
+        cursorX, cursorY = self:GetUICursorPosition()
+        if type(cursorX) ~= "number" or type(cursorY) ~= "number"
+            or cursorX ~= cursorX or cursorY ~= cursorY then
+            for id in pairs(profile.targets or {}) do runtime.hovered[id] = false end
+            return
+        end
+    end
     for id, settings in pairs(profile.targets or {}) do
         if settings.enabled and needed[id] then
             local frame = self:ResolveTarget(id)
             if frame and self.FrameInteractionContainsCursor then
-                runtime.hovered[id] = self:FrameInteractionContainsCursor(frame, id == "minimap")
+                runtime.hovered[id] = self:FrameInteractionContainsCursor(frame, id == "minimap", cursorX, cursorY)
                 if id == "minimap" and not runtime.hovered[id] and self.MinimapStackContainsCursor then
-                    runtime.hovered[id] = self:MinimapStackContainsCursor()
+                    runtime.hovered[id] = self:MinimapStackContainsCursor(cursorX, cursorY)
                 end
             else
-                runtime.hovered[id] = frame and self:FrameContainsCursor(frame) or false
+                runtime.hovered[id] = frame and self:FrameContainsCursor(frame, cursorX, cursorY) or false
             end
         else
             runtime.hovered[id] = false
         end
     end
+end
+
+local function SetActiveStatus(id, status)
+    local state = runtime.active[id]
+    if not state then state = {}; runtime.active[id] = state end
+    state.alpha, state.desired, state.index, state.reaction, state.inheritedFrom = nil, nil, nil, nil, nil
+    state.hostHidden, state.protected = nil, nil
+    state.unavailable = status == "unavailable" or nil
+    state.pendingRestore = status == "pendingRestore" or nil
+    if status == "hostHidden" then state.hostHidden = true end
+end
+
+local function SetActiveResolved(id, alpha, desired, index, reaction, inheritedFrom, hostHidden, isProtected)
+    local state = runtime.active[id]
+    if not state then state = {}; runtime.active[id] = state end
+    state.unavailable, state.pendingRestore = nil, nil
+    state.alpha, state.desired, state.index = alpha, desired, index
+    state.reaction, state.inheritedFrom = reaction, inheritedFrom
+    state.hostHidden, state.protected = hostHidden == true, isProtected
 end
 
 function ns:ApplyTarget(id, tickNow)
@@ -2950,7 +3148,7 @@ function ns:ApplyTarget(id, tickNow)
         runtime.fadeOutStarted[id] = nil
         runtime.revealGoal[id] = nil
         runtime.transitions[id] = nil
-        runtime.active[id] = { unavailable = true }
+        SetActiveStatus(id, "unavailable")
         return
     end
     -- A profile switch may be waiting to restore this provider frame's old
@@ -2959,7 +3157,7 @@ function ns:ApplyTarget(id, tickNow)
         runtime.fadeOutStarted[id] = nil
         runtime.revealGoal[id] = nil
         runtime.transitions[id] = nil
-        runtime.active[id] = { pendingRestore = true }
+        SetActiveStatus(id, "pendingRestore")
         return
     end
     if previous ~= frame and target and target.acquire then
@@ -2968,15 +3166,15 @@ function ns:ApplyTarget(id, tickNow)
             runtime.fadeOutStarted[id] = nil
             runtime.revealGoal[id] = nil
             runtime.transitions[id] = nil
-            runtime.active[id] = { unavailable = true }
+            SetActiveStatus(id, "unavailable")
             return
         end
     end
     runtime.frameByID[id] = frame
     runtime.managedIDByFrame[frame] = id
     if not (target and target.skipManagedAlphaHook) then self:HookManagedFrameAlpha(frame) end
-    local desired, index, reaction, inheritedFrom = self:Evaluate(id, settings)
     local now = tickNow or GetTime()
+    local desired, index, reaction, inheritedFrom = self:Evaluate(id, settings, nil, now)
     local current = runtime.currentAlpha[frame]
     if current == nil then
         current = SafeFrameAlpha(frame)
@@ -2984,7 +3182,7 @@ function ns:ApplyTarget(id, tickNow)
             runtime.fadeOutStarted[id] = nil
             runtime.revealGoal[id] = nil
             runtime.transitions[id] = nil
-            runtime.active[id] = { hostHidden = true }
+            SetActiveStatus(id, "hostHidden")
             return
         end
         runtime.baseAlpha[frame] = current
@@ -3067,15 +3265,7 @@ function ns:ApplyTarget(id, tickNow)
                 runtime.currentAlpha[frame] = desired
             end
         end
-        runtime.active[id] = {
-            alpha = current,
-            desired = desired,
-            index = index,
-            reaction = reaction,
-            inheritedFrom = inheritedFrom,
-            hostHidden = true,
-            protected = target and target.protected,
-        }
+        SetActiveResolved(id, current, desired, index, reaction, inheritedFrom, true, target and target.protected)
         return
     end
     if runtime.immediateApply[id] then
@@ -3087,15 +3277,7 @@ function ns:ApplyTarget(id, tickNow)
             current = desired
             runtime.currentAlpha[frame] = desired
         end
-        runtime.active[id] = {
-            alpha = current,
-            desired = desired,
-            index = index,
-            reaction = reaction,
-            inheritedFrom = inheritedFrom,
-            hostHidden = false,
-            protected = target and target.protected,
-        }
+        SetActiveResolved(id, current, desired, index, reaction, inheritedFrom, false, target and target.protected)
         return
     end
     if desired < current and (settings.fadeDelay or 0) > 0 then
@@ -3104,7 +3286,7 @@ function ns:ApplyTarget(id, tickNow)
         -- predictable wait using the newly selected values.
         runtime.fadeOutStarted[id] = runtime.fadeOutStarted[id] or now
         if now < runtime.fadeOutStarted[id] + settings.fadeDelay then
-            runtime.active[id] = { alpha = current, desired = desired, index = index, reaction = reaction, inheritedFrom = inheritedFrom, hostHidden = false, protected = target and target.protected }
+            SetActiveResolved(id, current, desired, index, reaction, inheritedFrom, false, target and target.protected)
             return
         end
     else
@@ -3120,15 +3302,7 @@ function ns:ApplyTarget(id, tickNow)
             current = desired
             runtime.currentAlpha[frame] = desired
         end
-        runtime.active[id] = {
-            alpha = current,
-            desired = desired,
-            index = index,
-            reaction = reaction,
-            inheritedFrom = inheritedFrom,
-            hostHidden = false,
-            protected = target.protected,
-        }
+        SetActiveResolved(id, current, desired, index, reaction, inheritedFrom, false, target.protected)
         return
     end
     -- Transitions are measured from a fixed starting point.  Repeatedly
@@ -3165,19 +3339,12 @@ function ns:ApplyTarget(id, tickNow)
     elseif transitionComplete then
         runtime.transitions[id] = nil
     end
-    runtime.active[id] = {
-        alpha = alpha,
-        desired = desired,
-        index = index,
-        reaction = reaction,
-        inheritedFrom = inheritedFrom,
-        hostHidden = false,
-        protected = target and target.protected,
-    }
+    SetActiveResolved(id, alpha, desired, index, reaction, inheritedFrom, false, target and target.protected)
 end
 
 function ns:PrimeCinematicTargets()
     if not self:IsCinematicActive() then return end
+    local now = GetTime()
     self:BuildStateContext()
     self:UpdateHover()
     local ids = {}
@@ -3185,7 +3352,7 @@ function ns:PrimeCinematicTargets()
         ids[#ids + 1] = id
         runtime.immediateApply[id] = true
     end
-    for _, id in ipairs(ids) do self:ApplyTarget(id) end
+    for _, id in ipairs(ids) do self:ApplyTarget(id, now) end
 end
 
 local function HasRuntimeEntries(values)
@@ -3459,23 +3626,23 @@ driver:RegisterEvent("PET_BATTLE_OPENING_START")
 driver:RegisterEvent("PET_BATTLE_CLOSE")
 driver:RegisterEvent("CHAT_MSG_LOOT")
 driver:RegisterEvent("UPDATE_BINDINGS")
-driver:RegisterEvent("UNIT_SPELLCAST_START")
-driver:RegisterEvent("UNIT_SPELLCAST_STOP")
-driver:RegisterEvent("UNIT_SPELLCAST_FAILED")
-driver:RegisterEvent("UNIT_SPELLCAST_FAILED_QUIET")
-driver:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
-driver:RegisterEvent("UNIT_SPELLCAST_CHANNEL_START")
-driver:RegisterEvent("UNIT_SPELLCAST_CHANNEL_STOP")
+driver:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
+driver:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")
+driver:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
+driver:RegisterUnitEvent("UNIT_SPELLCAST_FAILED_QUIET", "player")
+driver:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
+driver:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
+driver:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
 driver:RegisterEvent("UNIT_PET")
 driver:RegisterEvent("COMPANION_UPDATE")
-driver:RegisterEvent("UNIT_AURA")
+driver:RegisterUnitEvent("UNIT_AURA", "player")
 pcall(driver.RegisterEvent, driver, "SCENARIO_UPDATE")
 pcall(driver.RegisterEvent, driver, "UPDATE_SHAPESHIFT_FORM")
 pcall(driver.RegisterEvent, driver, "UPDATE_SHAPESHIFT_FORMS")
 pcall(driver.RegisterEvent, driver, "PLAYER_SPECIALIZATION_CHANGED")
 pcall(driver.RegisterEvent, driver, "SPELLS_CHANGED")
-pcall(driver.RegisterEvent, driver, "UNIT_SPELLCAST_EMPOWER_START")
-pcall(driver.RegisterEvent, driver, "UNIT_SPELLCAST_EMPOWER_STOP")
+pcall(driver.RegisterUnitEvent, driver, "UNIT_SPELLCAST_EMPOWER_START", "player")
+pcall(driver.RegisterUnitEvent, driver, "UNIT_SPELLCAST_EMPOWER_STOP", "player")
 for event in pairs(EVENT_TO_MOMENT) do driver:RegisterEvent(event) end
 
 function ns:Wake()

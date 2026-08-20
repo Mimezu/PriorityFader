@@ -35,7 +35,7 @@ end
 local function Shown(frame)
     if not frame then return false end
     local ok, value = pcall(function() return frame:IsShown() end)
-    return ok and value == true
+    return ok and not Secret(value) and value == true
 end
 
 local function Usable(frame)

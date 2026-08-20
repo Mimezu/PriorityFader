@@ -650,9 +650,11 @@ function ns:UpdateMinimapStack(rescan)
     local controlled = self.runtime and self.runtime.frameByID and self.runtime.frameByID.minimap == minimap
     local nextMultiplier = active and active.alpha
     if not minimap or not controlled or not ValidAlpha(nextMultiplier) then
-        local frames = {}
-        for frame in pairs(owned) do frames[#frames + 1] = frame end
-        for _, frame in ipairs(frames) do Release(frame) end
+        if next(owned) then
+            local frames = {}
+            for frame in pairs(owned) do frames[#frames + 1] = frame end
+            for _, frame in ipairs(frames) do Release(frame) end
+        end
         multiplier = 1
         scan = nil
         RestoreNativeMarkers(minimap or _G.Minimap)
@@ -717,9 +719,9 @@ function ns:IsMinimapStackFrame(frame)
     return frame and owned[frame] == true or false
 end
 
-function ns:MinimapStackContainsCursor()
+function ns:MinimapStackContainsCursor(x, y)
     for frame in pairs(owned) do
-        if not hoverExcluded[frame] and self:FrameContainsCursor(frame) then return true end
+        if not hoverExcluded[frame] and self:FrameContainsCursor(frame, x, y) then return true end
     end
     return false
 end
